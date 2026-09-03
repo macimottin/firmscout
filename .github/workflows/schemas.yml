@@ -1,4 +1,12 @@
-name: Schema Validation
+name: Registry Schemas
+
+# The Git-managed registry (dataset/ and collectors/config/) is the half of FirmScout's
+# data that humans write by hand, so it is the half that needs a fast, readable failure.
+#
+# This runs scripts/check-schemas.py, the same script contributors run locally via
+# `make schemas`. Using one tool in both places means a green CI and a green laptop mean
+# the same thing. It also handles multi-document YAML, which the category vocabulary
+# uses and which check-jsonschema's CLI does not expand globs for.
 
 on:
   push:
@@ -7,66 +15,44 @@ on:
       - 'dataset/**'
       - 'collectors/config/**'
       - 'packages/schemas/**'
+      - 'scripts/check-schemas.py'
+      - '.github/workflows/schemas.yml'
   pull_request:
-    branches: [main, develop]
     paths:
       - 'dataset/**'
       - 'collectors/config/**'
       - 'packages/schemas/**'
+      - 'scripts/check-schemas.py'
+      - '.github/workflows/schemas.yml'
+
+permissions:
+  contents: read
 
 jobs:
   schemas:
+    name: Validate the registry
     runs-on: ubuntu-latest
-    name: Schema Validation
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Guard: check if schema files exist
-      - name: Check for schema files
-        id: check-schemas
-        run: |
-          if [ -d packages/schemas ]; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "packages/schemas not found, skipping schema validation"
-          fi
-
-      - name: Set up Python
-        if: steps.check-schemas.outputs.found == 'true'
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      - name: Install check-jsonschema
-        if: steps.check-schemas.outputs.found == 'true'
-        run: pip install check-jsonschema
+      - name: Install validation dependencies
+        run: pip install --disable-pip-version-check jsonschema PyYAML
 
-      - name: Validate dataset vendors
-        if: steps.check-schemas.outputs.found == 'true'
-        run: |
-          check-jsonschema \
-            --schemafile packages/schemas/vendor.schema.json \
-            'dataset/vendors/*.yaml'
+      - name: Validate every registry document
+        run: python3 scripts/check-schemas.py
 
-      - name: Validate dataset products
-        if: steps.check-schemas.outputs.found == 'true'
-        run: |
-          check-jsonschema \
-            --schemafile packages/schemas/product.schema.json \
-            'dataset/products/**/*.yaml'
+      - name: Cross-check the registry against the Go loader
+        # The schemas give a contributor a readable error; the Go loader is the
+        # authority on what a valid document actually means. Running both catches the
+        # case where they have drifted apart, which is the failure mode a schema
+        # alone cannot detect.
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
 
-      - name: Validate dataset sources
-        if: steps.check-schemas.outputs.found == 'true'
-        run: |
-          check-jsonschema \
-            --schemafile packages/schemas/source.schema.json \
-            'dataset/sources/**/*.yaml'
-
-      - name: Validate collector config
-        if: steps.check-schemas.outputs.found == 'true'
-        run: |
-          check-jsonschema \
-            --schemafile packages/schemas/collector-config.schema.json \
-            'collectors/config/**/*.yaml'
+      - name: Load the registry with the production parser
+        run: go test ./internal/adapters/registry/... -count=1

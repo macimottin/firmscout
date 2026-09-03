@@ -53,7 +53,11 @@ jobs:
 
       - name: Run govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          # Pinned, but pinned to a version that understands the Go release this
+          # module targets. v1.1.4 predates Go 1.27 and crashes while building the
+          # SSA form rather than reporting anything, which reads as a vulnerability
+          # finding when it is a tool incompatibility.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
 
   gitleaks:
