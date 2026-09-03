@@ -6,8 +6,17 @@ on:
   push:
     branches: [main, develop]
 
+# Least privilege by default. Two jobs need more and say so individually, which is
+# also what makes it obvious in review when a third one starts asking for write access.
+permissions:
+  contents: read
+
 jobs:
   dependency-review:
+    permissions:
+      contents: read
+      # Required to read the pull request the review is about.
+      pull-requests: read
     runs-on: ubuntu-latest
     name: Dependency Review
     if: github.event_name == 'pull_request'
@@ -72,6 +81,13 @@ jobs:
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
 
   codeql:
+    permissions:
+      contents: read
+      # Required to upload the analysis. Without it CodeQL scans successfully and then
+      # fails at the last step with "Resource not accessible by integration", which
+      # reads like a finding rather than a permissions problem.
+      security-events: write
+      actions: read
     runs-on: ubuntu-latest
     name: CodeQL
 

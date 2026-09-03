@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main, develop]
 
+# CI reads the repository and nothing else. Declaring it explicitly means a workflow
+# that later needs write access has to ask for it in a diff someone reviews.
+permissions:
+  contents: read
+
 jobs:
   go:
     runs-on: ubuntu-latest
