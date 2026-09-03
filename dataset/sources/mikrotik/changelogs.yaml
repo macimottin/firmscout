@@ -1,0 +1,74 @@
+# =============================================================================
+# Source: MikroTik RouterOS changelog page
+# =============================================================================
+# Measured 2026-09-03:
+#   GET https://mikrotik.com/download/changelogs
+#     -> server-rendered HTML, roughly 409 KB
+#     -> cache-control: private, and NO ETag
+#     -> 46 changelog entries, each a div.changelog-header carrying a version,
+#        a channel badge (Long-term | Stable | Testing | Development) and a
+#        YYYY-MM-DD date.
+#   GET https://mikrotik.com/robots.txt
+#     -> "User-agent: *" with an empty "Disallow:", i.e. nothing is disallowed.
+#
+# Because the page serves no ETag and declares itself private, a conditional
+# request cannot be used as the change signal. The cheap signal available is a
+# hash over normalize.section_selector only -- hashing the whole 409 KB document
+# would report a change on essentially every check, and the cost of that is paid
+# on every source, forever.
+#
+# ------------------------------- ADR-0018 ------------------------------------
+# This source ships with enabled: false and terms_review_status: pending because
+# ADR-0018 requires a human to review the site's terms of use before any
+# collection happens. robots_policy_status is a mechanical, measured fact;
+# terms_review_status is a human judgement that has not yet been made. Neither
+# this file nor the collector config may enable collection until it has been.
+# -----------------------------------------------------------------------------
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: changelogs
+  vendor: mikrotik
+
+spec:
+  product: mikrotik-routeros
+  source_type: html_page
+  url: https://mikrotik.com/download/changelogs
+
+  # Authority
+  official: true
+  quality_class: official_manufacturer
+
+  # Compliance -- see the ADR-0018 note above.
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-03T00:00:00Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: a human must review mikrotik.com's terms of use before this source
+    is enabled. robots.txt permits the path (measured 2026-09-03), but robots
+    permission alone is not sufficient.
+  authentication_type: none
+
+  # Not collected from until the terms review above is complete.
+  enabled: false
+  health: pending_review
+
+  # Collection
+  collector_id: mikrotik.changelogs
+  expected_content_type: text/html
+
+  # Four checks a day. The vendor publishes a handful of releases a month; more
+  # frequent polling would buy nothing and cost the vendor bandwidth.
+  check_frequency_seconds: 21600
+  min_frequency_seconds: 3600
+
+  normalize:
+    # Hash only the changelog entries. This is the single biggest cost lever on
+    # this source: without it, every check reports a change.
+    section_selector: "div.changelog-header"
+    strip:
+      - script
+      - style
+      - noscript

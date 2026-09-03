@@ -1,0 +1,70 @@
+name: Bug report
+description: Something in the platform, site, or CLI is broken or behaves incorrectly.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A quick note on scope: this
+        form is for bugs in FirmScout itself (code, CLI, site, API). If the
+        problem is that a published *fact* is wrong (a version, a date, a
+        release type), please use the **Data correction** form instead — it
+        asks for the right kind of evidence.
+
+        Note also: FirmScout is pre-alpha. There is no production deployment
+        yet, so most reports will be about local development or the codebase
+        itself, not a live site.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands or actions that trigger this.
+      placeholder: |
+        1. Run `go test ./internal/domain/...`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste any error output. This is automatically formatted as code, no need for backticks.
+      render: shell
+  - type: input
+    id: component
+    attributes:
+      label: Where does this live?
+      description: A path or component, if you know it — e.g. "internal/domain/release", "apps/web", "a specific collector config".
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      description: The commit hash or version you're running, if relevant.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Go version, Node version, OS, Docker version — whatever's relevant.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: This is a bug in FirmScout's code/platform, not an incorrect published fact (which belongs in the Data correction form).
+          required: true

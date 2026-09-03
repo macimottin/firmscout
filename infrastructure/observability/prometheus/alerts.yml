@@ -1,0 +1,271 @@
+# Prometheus alerting rules for FirmScout, transcribed from
+# docs/architecture/observability.md §8.
+#
+# docs/architecture/observability.md §8 itself describes the long-term
+# alerting home as Grafana Alerting, provisioned under
+# infrastructure/observability/grafana/provisioning/alerting/ ("Alertmanager-
+# compatible"). This file implements the same rule *content* as native
+# Prometheus alerting rules instead, per this task's explicit brief, loaded
+# via `rule_files` in ../prometheus/prometheus.yml. Prometheus evaluates and
+# fires these on its own (visible under Prometheus's own Alerts UI /
+# `ALERTS` metric) whether or not anything is wired to receive them --
+# routing to Alertmanager or into Grafana Alerting as a receiver is a
+# separate configuration step not included in this Compose stack (no
+# Alertmanager service is defined here).
+#
+# The numeric thresholds are, per observability.md §8's own framing,
+# "sensible starting points, not measured facts" -- they are meant to be
+# tuned against real baselines once FirmScout has traffic, and that tuning
+# is itself tracked in this file.
+#
+# `severity` uses observability.md §8's own vocabulary directly: `page`
+# (users affected right now, gets worse the longer it waits) or `ticket`
+# (a leading indicator or maintenance item that can wait for business
+# hours). Where the source table gives both a base condition and a "page if
+# above X" escalation, both are implemented as separate rules below.
+#
+# Two alerts from observability.md §8 are intentionally NOT included here:
+# "Storage growth" needs an "allocated disk size" figure Prometheus has no
+# metric for (it would have to be a hardcoded, deployment-specific byte
+# threshold with no principled default), and "Certificate expiry" is a TLS
+# check against a public endpoint, not a query over any metric in the
+# docs/architecture/observability.md §5 catalogue (and there is no public
+# TLS-terminating endpoint in local Compose to check in the first place).
+# Both remain designed-but-not-built here, honestly, rather than
+# implemented with a fabricated threshold.
+
+groups:
+  - name: firmscout-api
+    rules:
+      - alert: FirmscoutAPIErrorRateHigh
+        expr: |
+          sum(rate(firmscout_api_requests_total{status_code=~"5.."}[5m]))
+            /
+          sum(rate(firmscout_api_requests_total[5m]))
+            > 0.05
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout API error rate above 5% for 5 minutes"
+          description: >-
+            More than 5% of API requests have returned a 5xx status over the
+            last 5 minutes. Users of the free site and the API are seeing
+            failures right now. First response: check the API operations
+            dashboard for the failing route; check recent deploys; check DB
+            and AI dependency health; roll back if correlated with a
+            release.
+
+      - alert: FirmscoutAPILatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(firmscout_api_request_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout API p95 latency above 1s for 10 minutes"
+          description: >-
+            p95 request latency has exceeded the 1 second SLO for 10
+            minutes, usually cascading from the database or a synchronous
+            downstream call. First response: check DB pool saturation;
+            check for a slow query; check whether a single route is
+            responsible.
+
+  - name: firmscout-queue
+    rules:
+      - alert: FirmscoutQueueDepthHigh
+        expr: firmscout_queue_depth > 500
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "FirmScout queue depth above 500 for 15 minutes"
+          description: >-
+            Workers are falling behind producers on queue
+            {{ $labels.queue_name }}. First response: check worker process
+            health and count; check for a poison message stuck at the head.
+
+      - alert: FirmscoutQueueDepthCritical
+        expr: firmscout_queue_depth > 2000
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout queue depth above 2000 for 15 minutes"
+          description: >-
+            Queue {{ $labels.queue_name }} depth has crossed the paging
+            threshold (2000) -- the same underlying condition as
+            FirmscoutQueueDepthHigh, escalated. First response: check worker
+            process health and count; check for a poison message stuck at
+            the head.
+
+      - alert: FirmscoutQueueOldestMessageAgeHigh
+        expr: firmscout_queue_oldest_message_age_seconds > 900
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout oldest queue message older than 15 minutes"
+          description: >-
+            The oldest undelivered message on queue
+            {{ $labels.queue_name }} has been waiting more than 15 minutes.
+            This catches a *stalled* worker even when depth looks fine.
+            First response: check worker logs for a repeatedly failing job;
+            check for a deadlock or crash loop.
+
+      - alert: FirmscoutQueueDeadLetterArrivals
+        expr: increase(firmscout_queue_dead_letter_total[15m]) > 0
+        for: 1m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "FirmScout jobs arriving in the dead-letter queue"
+          description: >-
+            At least one job on queue {{ $labels.queue_name }} was
+            permanently abandoned (not just delayed) in the last 15
+            minutes, reason={{ $labels.reason }}. First response: inspect
+            the dead-lettered payloads; usually points to a collector bug
+            or a schema mismatch.
+
+      - alert: FirmscoutQueueDeadLetterArrivalsCritical
+        expr: increase(firmscout_queue_dead_letter_total[15m]) > 10
+        for: 1m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout more than 10 dead-lettered jobs in 15 minutes"
+          description: >-
+            Dead-letter arrivals on queue {{ $labels.queue_name }} have
+            crossed the paging threshold (10 in 15m) -- the same underlying
+            condition as FirmscoutQueueDeadLetterArrivals, escalated. First
+            response: inspect the dead-lettered payloads; usually points to
+            a collector bug or a schema mismatch.
+
+  - name: firmscout-collectors
+    rules:
+      - alert: FirmscoutCollectorFailureRateByVendor
+        expr: |
+          sum by (vendor) (rate(firmscout_collector_checks_total{outcome="failed"}[1h]))
+            /
+          sum by (vendor) (rate(firmscout_collector_checks_total[1h]))
+            > 0.5
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: "FirmScout vendor {{ $labels.vendor }} collector failure rate above 50%"
+          description: >-
+            More than half of checks for vendor {{ $labels.vendor }} have
+            failed over the last hour -- the vendor's source has likely
+            relocated or changed layout. First response: route to the
+            collector-health dashboard and the collector maintenance
+            backlog.
+
+      - alert: FirmscoutSourcesNewlyBroken
+        # docs/architecture/observability.md §8 defines this alert's true
+        # trigger as the source health state machine transitioning to
+        # `broken` for one specific source (via the SourceBroken analytics
+        # event, or N consecutive failed checks for THAT source) -- a
+        # per-source signal that lives in PostgreSQL (`sources`,
+        # `analytics_events`), not in a Prometheus metric, and cannot be
+        # expressed as a per-source Prometheus alert without a `source_id`
+        # label, which docs/architecture/observability.md §5's cardinality
+        # warning explicitly forbids. The literal alert belongs as a
+        # Grafana Alerting rule against the PostgreSQL datasource (see the
+        # "Recently broken sources" panel query in grafana-dashboards.md's
+        # Collector health dashboard for the equivalent SQL) -- out of
+        # scope for this Prometheus-native rules file. The rule below is an
+        # APPROXIMATION using only catalogued, safely-labelled metrics: a
+        # short-window, per-vendor burst of failures as an early proxy for
+        # "a source in this vendor just started failing," not an exact
+        # per-source implementation of the documented condition.
+        expr: sum by (vendor) (increase(firmscout_collector_checks_total{outcome="failed"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "FirmScout possible newly-broken source(s) for vendor {{ $labels.vendor }}"
+          description: >-
+            Vendor {{ $labels.vendor }} has logged at least 3 failed checks
+            in 15 minutes -- an early signal before a collector fully
+            fails, so maintenance can happen before AI repair is needed.
+            This is a vendor-level approximation of the per-source
+            "newly broken" condition -- see this rule's inline comment.
+            First response: check the specific source's recent check
+            history and the collector's fixture tests.
+
+      - alert: FirmscoutPublicationRateZero
+        expr: |
+          sum(rate(firmscout_collector_publications_total[24h])) == 0
+            and
+          sum(rate(firmscout_collector_checks_total[24h])) > 0
+        for: 30m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout publication rate has fallen to zero"
+          description: >-
+            No releases have been published in the last 24 hours despite
+            checks continuing to run -- a SILENT FAILURE with no other
+            error surfacing it on its own. First response: check
+            firmscout_collector_validation_failures_total by gate for a
+            spike; a regression in ValidateCandidateRelease is the usual
+            cause.
+
+  - name: firmscout-ai
+    rules:
+      - alert: FirmscoutAIBudgetThreshold
+        expr: |
+          sum(increase(firmscout_ai_cost_usd_total[24h]))
+            /
+          firmscout_ai_budget_cap_usd{period="daily"}
+            > 0.8
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "FirmScout AI daily spend above 80% of budget cap"
+          description: >-
+            24h AI spend has crossed 80% of the configured daily budget
+            cap -- possible runaway AI spend, or the escalation path
+            firing far more than expected. First response: check which
+            agent/vendor combination is driving spend; verify the circuit
+            breaker engaged at the cap.
+
+      - alert: FirmscoutAIBudgetExceeded
+        expr: |
+          sum(increase(firmscout_ai_cost_usd_total[24h]))
+            /
+          firmscout_ai_budget_cap_usd{period="daily"}
+            > 1.0
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout AI daily spend has exceeded budget cap"
+          description: >-
+            24h AI spend has crossed 100% of the configured daily budget
+            cap -- the same underlying condition as
+            FirmscoutAIBudgetThreshold, escalated. First response: check
+            which agent/vendor combination is driving spend; verify the
+            circuit breaker engaged at the cap.
+
+  - name: firmscout-database
+    rules:
+      - alert: FirmscoutDBConnectionSaturation
+        expr: |
+          firmscout_db_pool_connections{state="active"}
+            /
+          firmscout_db_pool_max_connections
+            > 0.9
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "FirmScout database connection pool above 90% active"
+          description: >-
+            The connection pool is 90% saturated -- request failures are
+            imminent once the pool is exhausted. First response: check for
+            a connection leak or a slow query holding connections open.

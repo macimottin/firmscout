@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firmscout.dev/schemas/vendor.schema.json",
+  "title": "FirmScout vendor registry entry",
+  "description": "A manufacturer or publisher whose products FirmScout catalogues. Registry entries live in Git, are reviewed as pull requests, and are synchronised into PostgreSQL by `firmscout registry sync`. See ADR-0016.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "firmscout.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "Vendor"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 64,
+          "description": "The public identifier. It appears in URLs and API responses and is immutable after creation."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "legal_name": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "homepage_url": {
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "support_url": {
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "security_advisory_url": {
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "country_code": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Other names the vendor trades under, including names it acquired."
+        }
+      }
+    }
+  }
+}

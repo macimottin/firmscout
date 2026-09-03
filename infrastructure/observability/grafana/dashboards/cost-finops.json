@@ -1,0 +1,49 @@
+{
+  "uid": "firmscout-cost-finops",
+  "title": "Cost and FinOps (stub)",
+  "description": "STUB -- see docs/architecture/grafana-dashboards.md #6 for the full specification. Not implemented.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "tags": [
+    "firmscout",
+    "finops",
+    "stub"
+  ],
+  "style": "dark",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Not yet implemented",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "# Cost and FinOps -- stub\n\nThis dashboard is a **stub**, not a working implementation. It is registered here (and provisioned by Grafana) so the file exists at the path grafana-dashboards.md's provisioning section names, but its panels have not been built.\n\nThe real specification -- audience, refresh interval, decision supported, and every panel's query -- is #6 of [docs/architecture/grafana-dashboards.md](../grafana-dashboards.md#6-cost-and-finops). See infrastructure/observability/grafana/dashboards/README.md for which dashboards are real and which are stubs."
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": []
+}

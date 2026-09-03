@@ -1,0 +1,91 @@
+# =============================================================================
+# Product categories
+# =============================================================================
+# The controlled vocabulary products are classified by. It is one file rather
+# than one file per term because a vocabulary reads and reviews better as a
+# list: adding a term should invite the question "is this genuinely distinct
+# from the ones above it?", which a directory of separate files hides.
+#
+# Categories are declared, never created on demand. A product referencing a
+# slug that is not in this file fails `firmscout registry sync` with an error
+# naming the file, rather than silently minting a new category from a typo and
+# quietly fragmenting the browse experience.
+#
+# Adding a category is a pull request. Keep the tree shallow: two levels is
+# usually enough, and a deep hierarchy makes products hard to find.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: networking
+spec:
+  name: Networking
+  description: >-
+    Routers, switches, wireless access points and the software that runs on
+    them.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: network-operating-system
+spec:
+  name: Network operating system
+  parent: networking
+  description: >-
+    Operating systems shipped on networking hardware, released as their own
+    version stream independently of any single device model. RouterOS, and the
+    equivalents from other vendors, belong here rather than under "firmware":
+    they are general-purpose operating systems for the device, not component
+    firmware images.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: firewalls
+spec:
+  name: Firewalls and security appliances
+  parent: networking
+  description: >-
+    Perimeter and inline security appliances, physical and virtual.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: servers
+spec:
+  name: Servers
+  description: >-
+    Rack, tower and blade servers. Note that one server typically has several
+    independent release streams -- BIOS, BMC firmware, drivers and an appliance
+    operating system -- which are distinguished by release type, not by
+    category.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: storage
+spec:
+  name: Storage
+  description: >-
+    Storage arrays, NAS devices and storage operating systems.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: collaboration-devices
+spec:
+  name: Collaboration and meeting-room devices
+  description: >-
+    Video bars, codecs, room controllers, and the platform software that runs
+    on them.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: power-and-ups
+spec:
+  name: Power and UPS equipment
+  description: >-
+    Uninterruptible power supplies, power distribution units and their
+    management cards.

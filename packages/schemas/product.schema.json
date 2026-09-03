@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firmscout.dev/schemas/product.schema.json",
+  "title": "FirmScout product registry entry",
+  "description": "An exact model, or a software product with an independently released version stream.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "firmscout.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "Product"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "slug",
+        "vendor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 128,
+          "description": "Globally unique public identifier, immutable after creation. Conventionally `<vendor>-<model>`."
+        },
+        "vendor": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "family": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "model_identifier": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "default_release_type": {
+          "enum": [
+            "firmware",
+            "bios",
+            "bmc_firmware",
+            "driver",
+            "operating_system",
+            "embedded_os",
+            "application_software",
+            "saas_release",
+            "management_platform",
+            "security_update",
+            "documentation_only",
+            "unknown"
+          ],
+          "description": "The kind of release this product normally publishes. Labelling everything firmware is the failure this field prevents: a server has BIOS, BMC firmware, drivers and an appliance OS, and a user searching for one does not want the others."
+        },
+        "lifecycle_status": {
+          "enum": [
+            "active",
+            "maintenance",
+            "eol_announced",
+            "eol",
+            "eos",
+            "unknown"
+          ],
+          "default": "active"
+        },
+        "security_critical": {
+          "type": "boolean",
+          "default": false
+        },
+        "popularity_score": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "category_slugs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Other names this product is known by. Aliases drive search and product matching, so a common misspelling is as useful here as an official model number.",
+          "items": {
+            "type": "object",
+            "required": [
+              "alias"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "alias": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "kind": {
+                "enum": [
+                  "marketing_name",
+                  "model_number",
+                  "sku",
+                  "regional_name",
+                  "legacy_name",
+                  "vendor_internal",
+                  "common_misspelling"
+                ],
+                "default": "marketing_name"
+              },
+              "source_note": {
+                "type": "string",
+                "maxLength": 1000
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

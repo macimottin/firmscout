@@ -1,0 +1,269 @@
+# OpenTelemetry Collector configuration for FirmScout.
+#
+# This file is environment-agnostic by design (docs/architecture/observability.md
+# §2): the same file runs unmodified locally (Docker Compose) and on AWS.
+# Only exporter endpoints/credentials differ, and those are supplied by
+# environment variables at deploy time, never by conditional logic in this
+# file. `${env:FIRMSCOUT_ENV}` below is the one place environment identity
+# enters the pipeline, and it only stamps a resource attribute -- it never
+# changes which processors or exporters run.
+#
+# Pipeline order matches docs/architecture/observability.md §2's numbered
+# steps: receive -> (memory guard) -> redact -> filter attributes -> sample
+# -> batch -> export. `memory_limiter` and `batch` bracket the pipeline per
+# upstream Collector guidance (memory_limiter first so it can reject/pace
+# before anything else does real work; batch last so every processor before
+# it sees whole, unbatched records).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Protects the Collector process itself from an OOM kill under a burst of
+  # telemetry -- runs first in every pipeline, ahead of anything that
+  # allocates more memory (batching, tail sampling's span buffer).
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+
+  # Stamps resource attributes present on every signal, per
+  # docs/architecture/observability.md §3's "Resource attributes on every
+  # signal" list. service.name/service.version/service.instance.id are set
+  # by each application's own OTel SDK at the source; this processor adds
+  # the two attributes that are a deployment-topology fact rather than an
+  # application fact, and are therefore more appropriate to set once, here,
+  # than duplicated in every service's SDK configuration.
+  resource:
+    attributes:
+      - key: deployment.environment.name
+        value: ${env:FIRMSCOUT_ENV}
+        action: upsert
+      - key: service.namespace
+        value: firmscout
+        action: upsert
+
+  # --- Secret redaction (defense in depth, two layers) -----------------
+  #
+  # Layer 1: exact-match DELETE. Removes specific, known attribute keys
+  # entirely -- key and value both gone from the record. This covers the
+  # concrete attribute names `otelhttp` (server and client instrumentation)
+  # and the pgx tracer hook are documented to produce for header/credential
+  # data (docs/architecture/observability.md §6's absolute redaction list).
+  # This is the literal "delete" enforcement point.
+  attributes/redact_delete:
+    actions:
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+      - key: http.request.header.x-api-key
+        action: delete
+      - key: http.response.header.set-cookie
+        action: delete
+      - key: authorization
+        action: delete
+      - key: api_key
+        action: delete
+      - key: x_api_key
+        action: delete
+      - key: x-api-key
+        action: delete
+      - key: token
+        action: delete
+      - key: password
+        action: delete
+      - key: secret
+        action: delete
+      - key: cookie
+        action: delete
+
+  # Layer 2: pattern-match MASK. Catches any attribute key that merely
+  # *resembles* a secret (a header or field name we didn't anticipate
+  # verbatim above -- e.g. a future `X-Vendor-Auth-Token` or
+  # `db.connection_string`) by regex over the key name, so a new secret-
+  # shaped field is masked by default rather than silently passing through
+  # until someone remembers to add it to Layer 1's exact list. Values are
+  # replaced with a fixed mask string; `blocked_values` additionally masks
+  # anything that looks like a bearer/basic auth header value even if it
+  # rode in under an unrelated key name. This is the processor named in the
+  # brief as "attributes/redaction" -- the contrib `redaction` processor is
+  # the component that actually implements deny-by-key-pattern masking;
+  # `allow_all_keys: true` means it does not otherwise touch unrelated
+  # attributes (it is not an allow-list here, only a deny-pattern).
+  redaction:
+    allow_all_keys: true
+    blocked_key_patterns:
+      - "(?i).*authoriz.*"
+      - "(?i).*api[_-]?key.*"
+      - "(?i).*token.*"
+      - "(?i).*password.*"
+      - "(?i).*secret.*"
+      - "(?i).*cookie.*"
+    blocked_values:
+      - "(?i)^(bearer|basic)\\s+.+"
+    summary: debug
+
+  # --- Cardinality guard (metrics pipeline only) -------------------------
+  #
+  # docs/architecture/observability.md §5's cardinality warning: a product
+  # slug, source ID, API key (or prefix), customer identifier, or URL must
+  # never become a Prometheus label. Traces and logs are explicitly exempt
+  # (§5, §7) because they are not aggregated into a permanent indexed time
+  # series the way a metric label is -- so this processor is wired into the
+  # metrics pipeline only, below, never into traces/logs.
+  attributes/metrics_cardinality_guard:
+    actions:
+      - key: firmscout.source_id
+        action: delete
+      - key: firmscout.product_slug
+        action: delete
+      - key: firmscout.candidate_id
+        action: delete
+      - key: firmscout.release_id
+        action: delete
+      - key: firmscout.request_id
+        action: delete
+      - key: url.full
+        action: delete
+      - key: url.path
+        action: delete
+      - key: http.route
+        action: update
+        # Route pattern only, e.g. /api/v1/products/{slug} -- never the
+        # resolved path with an actual slug in it. Applications are expected
+        # to already emit the pattern (otelhttp does, when routes are
+        # registered with a pattern-aware mux); this is a second line of
+        # defense, not the primary mechanism.
+        from_attribute: http.route
+
+  # Tail-based sampling (traces only -- wired into the traces pipeline
+  # below). Policies evaluated as an OR: a trace is kept if ANY policy
+  # matches. Mirrors docs/architecture/observability.md §7 exactly:
+  # always keep errors, always keep slow traces, always keep AI agent runs,
+  # otherwise sample the remainder at the head-based rate's illustrative
+  # figure.
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - name: always-keep-errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: always-keep-slow-traces
+        type: latency
+        latency:
+          threshold_ms: 1000
+      - name: always-keep-ai-runs
+        type: string_attribute
+        string_attribute:
+          key: firmscout.agent
+          values: [".*"]
+          enabled_regex_matching: true
+      - name: sample-the-remainder
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
+  # Batches signals before export so the Collector makes a handful of
+  # efficient calls per backend instead of one call per span/metric point/
+  # log record. Last processor in every pipeline, per upstream guidance.
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+exporters:
+  # Application metrics, scraped by Prometheus (see
+  # infrastructure/observability/prometheus/prometheus.yml's
+  # `otel-collector` job, target otel-collector:8889). Pull-based, matching
+  # "Prometheus's own scrape of the Collector's ... exporter endpoint"
+  # (docs/architecture/observability.md §2 step 6).
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # Logs to Loki over Loki's native OTLP ingestion endpoint.
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+  # Traces to Tempo over OTLP/gRPC.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Human-readable console output for local debugging (`docker compose logs
+  # otel-collector`); `verbosity: basic` avoids dumping full payloads (which
+  # would otherwise re-introduce exactly the leak this file's redaction
+  # processors exist to prevent, in the Collector's own stdout).
+  debug:
+    verbosity: basic
+
+extensions:
+  # Exposes /healthz-equivalent liveness at :13133, used by
+  # docker-compose.yml's `otel-collector` service healthcheck.
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+
+  # The Collector's own operational metrics (queue lengths, dropped spans,
+  # exporter errors) -- distinct from the `prometheus` exporter above, which
+  # carries *application*-emitted metrics. Scraped by Prometheus as a
+  # separate job (`otel-collector-self`) per
+  # infrastructure/observability/prometheus/prometheus.yml.
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+    logs:
+      level: info
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - attributes/redact_delete
+        - redaction
+        - tail_sampling
+        - batch
+      exporters: [otlp/tempo, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - attributes/redact_delete
+        - redaction
+        - attributes/metrics_cardinality_guard
+        - batch
+      exporters: [prometheus, debug]
+
+    logs:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - resource
+        - attributes/redact_delete
+        - redaction
+        - batch
+      exporters: [otlphttp/loki, debug]

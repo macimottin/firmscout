@@ -1,0 +1,38 @@
+{
+  "collectorId": "synthetic.month-only",
+  "note": "SYNTHETIC. Read by the synthetic month_only config in html_selectors_test.go. The first entry is dated '2026-02' and must produce month precision with no day. The second has no parsable date and must produce the unknown date rather than an approximation.",
+  "warningsContain": [
+    "release date recorded as unknown"
+  ],
+  "candidates": [
+    {
+      "rawVersion": "7.20.1",
+      "normalizedVersion": "7.20.1",
+      "releaseDate": {
+        "precision": "month_only",
+        "value": "2026-02"
+      },
+      "releaseType": "embedded_os",
+      "channel": "long_term",
+      "applicability": {
+        "productHint": "mikrotik-routeros"
+      },
+      "evidenceExcerptContains": "7.20.1 Long-term 2026-02",
+      "confidenceAtLeast": 0.9
+    },
+    {
+      "rawVersion": "7.20.0",
+      "normalizedVersion": "7.20.0",
+      "releaseDate": {
+        "precision": "unknown"
+      },
+      "releaseType": "embedded_os",
+      "channel": "long_term",
+      "applicability": {
+        "productHint": "mikrotik-routeros"
+      },
+      "evidenceExcerptContains": "7.20.0 Long-term not yet announced",
+      "confidenceAtLeast": 0.8
+    }
+  ]
+}

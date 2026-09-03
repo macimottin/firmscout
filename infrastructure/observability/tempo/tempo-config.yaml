@@ -1,0 +1,55 @@
+# Tempo configuration for FirmScout local development.
+#
+# DEVELOPMENT CONFIGURATION, NOT PRODUCTION. Single-binary (monolithic)
+# mode, in-memory ring, local filesystem trace storage under the
+# `tempo_data` Compose volume. On AWS this becomes object storage (S3) per
+# docs/architecture/observability.md §2 -- this file is not that config.
+#
+# Only the OTel Collector talks to Tempo's OTLP receiver
+# (infrastructure/observability/otel-collector-config.yaml's `otlp/tempo`
+# exporter, at tempo:4317 on the internal Compose network); this receiver is
+# not published to the host.
+
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+    blocklist_poll: 5m
+    block:
+      version: vParquet4
+
+compactor:
+  compaction:
+    # Retention per docs/architecture/observability.md §9: traces kept 7
+    # days locally, deliberately shorter than logs -- traces are for active
+    # debugging of a recent incident, not historical analysis.
+    block_retention: 168h
+    compaction_window: 1h
+
+# Privacy-conscious default, matching FirmScout's own product-analytics
+# stance (blueprint §20) and the same choice made in loki-config.yaml.
+usage_report:
+  reporting_enabled: false

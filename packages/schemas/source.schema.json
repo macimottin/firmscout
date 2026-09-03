@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firmscout.dev/schemas/source.schema.json",
+  "title": "FirmScout source registry entry",
+  "description": "A monitored location, together with the compliance status that decides whether FirmScout may collect from it at all. See ADR-0018: compliance is evaluated before collection, not audited after it.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "firmscout.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "Source"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "slug",
+        "vendor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 128
+        },
+        "vendor": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "source_type",
+        "url",
+        "robots_policy_status",
+        "terms_review_status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "product": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "family": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "covers_products": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          "description": "Every product this source covers. One catalogue page serving forty products is fetched once, which is the largest single saving available in the system."
+        },
+        "source_type": {
+          "enum": [
+            "rest_api",
+            "graphql_api",
+            "rss_atom",
+            "xml_feed",
+            "json_endpoint",
+            "html_page",
+            "pdf_release_notes",
+            "download_portal",
+            "github_releases",
+            "sitemap",
+            "authenticated_portal",
+            "manual"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "maxLength": 2000
+        },
+        "official": {
+          "type": "boolean",
+          "default": false,
+          "description": "True only when the URL is on a manufacturer-controlled domain. Marking a third-party source official would let it silently outrank the vendor's own page."
+        },
+        "quality_class": {
+          "enum": [
+            "official_manufacturer",
+            "authorized_portal",
+            "vendor_repository",
+            "trusted_community",
+            "unknown_third_party"
+          ],
+          "default": "unknown_third_party"
+        },
+        "robots_policy_status": {
+          "enum": [
+            "allowed",
+            "disallowed",
+            "unknown",
+            "not_applicable"
+          ],
+          "description": "A measured fact: what the host's robots.txt says about this path for FirmScout's declared user agent."
+        },
+        "robots_checked_at": {
+          "type": "string"
+        },
+        "terms_review_status": {
+          "enum": [
+            "pending",
+            "approved",
+            "restricted",
+            "prohibited"
+          ],
+          "default": "pending",
+          "description": "A human judgement, not a measurement: someone has read the site's terms of use. New sources start pending, which means they are not collected."
+        },
+        "terms_review_note": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "authentication_type": {
+          "enum": [
+            "none",
+            "api_key",
+            "account_required",
+            "entitlement_required"
+          ],
+          "default": "none",
+          "description": "What credentials the source demands. FirmScout never bypasses authentication; a source needing credentials it lacks is recorded honestly and left uncollected."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the scheduler may dispatch checks. Defaults to false so a newly contributed source cannot be collected before a maintainer has reviewed its compliance status."
+        },
+        "health": {
+          "enum": [
+            "discovered",
+            "pending_review",
+            "active",
+            "degraded",
+            "rate_limited",
+            "authentication_required",
+            "broken",
+            "relocated",
+            "disabled",
+            "retired"
+          ]
+        },
+        "confidence_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "collector_id": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "expected_content_type": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "check_frequency_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "default": 86400
+        },
+        "min_frequency_seconds": {
+          "type": "integer",
+          "minimum": 60
+        },
+        "normalize": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "section_selector": {
+              "type": "string",
+              "description": "Hash only the elements this selector matches. Without it, a page carrying rotating banners or session tokens reports a change on every single check."
+            },
+            "strip": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      }
+    }
+  }
+}

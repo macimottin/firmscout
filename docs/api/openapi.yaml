@@ -1,0 +1,671 @@
+openapi: 3.1.0
+info:
+  title: FirmScout API
+  version: "1.0.0-mvp"
+  summary: >-
+    Version metadata catalogue with provenance for firmware, BIOS, BMC
+    firmware, drivers, embedded operating systems, and appliance software.
+  description: >-
+    Human-readable design lives in docs/architecture/api.md, which is
+    authoritative when this document and that one could be read as
+    disagreeing. This document covers the MVP read endpoints only; write
+    endpoints (corrections, webhooks, inventory upload) are a later phase
+    and are not described here.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  contact:
+    name: FirmScout
+    url: https://firmscout.dev
+externalDocs:
+  description: Full API design document
+  url: ../architecture/api.md
+servers:
+  - url: https://api.firmscout.dev/api/v1
+    description: Production
+  - url: http://localhost:8080/api/v1
+    description: Local development (docker compose)
+
+tags:
+  - name: search
+    description: Full-text and alias search over products and vendors.
+  - name: vendors
+    description: Vendor catalogue.
+  - name: products
+    description: Product catalogue, releases, and advisories.
+  - name: releases
+    description: Immutable, evidence-backed release facts.
+  - name: system
+    description: Operational endpoints outside the versioned API surface.
+
+paths:
+  /search:
+    get:
+      operationId: search
+      tags: [search]
+      summary: Search products and vendors
+      description: >-
+        Full-text and alias search. Anonymous requests are permitted and
+        rate-limited more tightly than keyed requests.
+      security:
+        - {}
+        - ApiKeyAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query, 1-200 characters.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Search results.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+            X-RateLimit-Limit: { $ref: "#/components/headers/XRateLimitLimit" }
+            X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
+            X-RateLimit-Reset: { $ref: "#/components/headers/XRateLimitReset" }
+            Cache-Control: { $ref: "#/components/headers/CacheControlShort" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List vendors
+      security:
+        - {}
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of vendors.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+            Cache-Control: { $ref: "#/components/headers/CacheControlLong" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VendorListResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /vendors/{slug}:
+    get:
+      operationId: getVendor
+      tags: [vendors]
+      summary: Get a vendor by slug
+      security:
+        - {}
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/VendorSlug"
+      responses:
+        "200":
+          description: The vendor.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControlLong" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /products/{slug}:
+    get:
+      operationId: getProduct
+      tags: [products]
+      summary: Get a product by slug
+      security:
+        - {}
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductSlug"
+      responses:
+        "200":
+          description: The product, including a latest-release summary.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControlLong" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /products/{slug}/releases:
+    get:
+      operationId: listProductReleases
+      tags: [products, releases]
+      summary: List releases for a product
+      description: >-
+        Free and anonymous responses are windowed to the most recent 12
+        months regardless of limit/cursor reach; Professional and above
+        receive unwindowed, complete history.
+      security:
+        - {}
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductSlug"
+        - name: channel
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/Channel"
+        - name: releaseType
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Releases are never sorted by version string (blueprint 3.5,
+            ADR-0017) -- only these two fields are valid sort keys.
+          schema:
+            type: string
+            enum: [releaseDate, firstObservedAt]
+            default: releaseDate
+        - name: order
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: A page of releases.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+            Cache-Control: { $ref: "#/components/headers/CacheControlMedium" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReleaseListResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /products/{slug}/latest:
+    get:
+      operationId: getLatestRelease
+      tags: [products, releases]
+      summary: Get the latest observed release for a product
+      security:
+        - {}
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ProductSlug"
+        - name: channel
+          in: query
+          required: false
+          description: Restrict to the latest release on a specific channel.
+          schema:
+            $ref: "#/components/schemas/Channel"
+      responses:
+        "200":
+          description: The latest observed release.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControlMedium" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LatestReleaseResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /releases/{id}:
+    get:
+      operationId: getRelease
+      tags: [releases]
+      summary: Get one immutable release by id
+      security:
+        - {}
+        - ApiKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^rel_[A-Za-z0-9]{20,32}$"
+      responses:
+        "200":
+          description: The release. Immutable once published; cacheable forever.
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+            ETag: { $ref: "#/components/headers/ETag" }
+            Cache-Control: { $ref: "#/components/headers/CacheControlImmutable" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Release"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /healthz:
+    get:
+      operationId: healthz
+      tags: [system]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: The process is up but not ready to serve traffic.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: >-
+        "Bearer <api key>". Optional on read endpoints (raises the
+        rate-limit and quota tier); required on write and bulk endpoints
+        not described in this MVP document.
+
+  parameters:
+    VendorSlug:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+      example: mikrotik
+    ProductSlug:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+      example: mikrotik-routeros
+
+  headers:
+    XRequestId:
+      description: Echoed or generated request correlation id.
+      schema:
+        type: string
+    ETag:
+      description: Entity tag for conditional requests.
+      schema:
+        type: string
+    CacheControlShort:
+      description: Short-lived cache policy (search results).
+      schema:
+        type: string
+        example: "public, max-age=60"
+    CacheControlMedium:
+      description: Medium cache policy, invalidated on publish.
+      schema:
+        type: string
+        example: "public, max-age=300"
+    CacheControlLong:
+      description: Long cache policy, invalidated on publish.
+      schema:
+        type: string
+        example: "public, max-age=3600"
+    CacheControlImmutable:
+      description: Immutable, cacheable forever.
+      schema:
+        type: string
+        example: "public, max-age=31536000, immutable"
+    XRateLimitLimit:
+      schema: { type: integer }
+    XRateLimitRemaining:
+      schema: { type: integer }
+    XRateLimitReset:
+      description: Unix timestamp when the rate-limit window resets.
+      schema: { type: integer }
+    RetryAfter:
+      description: Seconds until a retry is likely to succeed.
+      schema: { type: integer }
+
+  responses:
+    BadRequest:
+      description: The request was invalid.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: The requested resource does not exist.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    TooManyRequests:
+      description: Rate limit or quota exceeded.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+        X-RateLimit-Limit: { $ref: "#/components/headers/XRateLimitLimit" }
+        X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
+        X-RateLimit-Reset: { $ref: "#/components/headers/XRateLimitReset" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    DatePrecision:
+      type: string
+      enum: [exact_day, month_only, year_only, unknown]
+      description: >-
+        Governs how the paired date field is rendered: YYYY-MM-DD for
+        exact_day, YYYY-MM for month_only, YYYY for year_only, and the
+        date field is omitted entirely for unknown. Always present
+        alongside its date field. See docs/architecture/api.md, "Date
+        rendering discipline".
+
+    Channel:
+      type: string
+      enum: [stable, long_term, testing, development]
+
+    SourceKind:
+      type: string
+      enum: [html, text, json, xml, pdf, rss_atom]
+
+    VendorSummary:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string, example: mikrotik }
+        name: { type: string, example: MikroTik }
+
+    ProductSummary:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string, example: mikrotik-routeros }
+        name: { type: string, example: RouterOS }
+
+    Vendor:
+      type: object
+      required: [slug, name, website, productCount, lastVerifiedAt]
+      properties:
+        slug: { type: string, example: mikrotik }
+        name: { type: string, example: MikroTik }
+        website: { type: string, format: uri, example: "https://mikrotik.com" }
+        productCount: { type: integer, minimum: 0 }
+        lastVerifiedAt: { type: string, format: date-time }
+
+    VendorListResponse:
+      type: object
+      required: [vendors, pagination]
+      properties:
+        vendors:
+          type: array
+          items: { $ref: "#/components/schemas/Vendor" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    OfficialSource:
+      type: object
+      required: [url, kind, official]
+      properties:
+        url: { type: string, format: uri }
+        kind: { $ref: "#/components/schemas/SourceKind" }
+        official: { type: boolean }
+
+    ReleaseSummary:
+      type: object
+      required: [id, rawVersion, channel, releaseDatePrecision]
+      properties:
+        id: { type: string, example: "rel_01J8Z3K9QWERTYUIOPASDFGH" }
+        rawVersion: { type: string, example: "7.24.2" }
+        channel: { $ref: "#/components/schemas/Channel" }
+        releaseDate:
+          type: string
+          description: >-
+            Rendered per releaseDatePrecision; omitted entirely when
+            precision is "unknown".
+          example: "2026-09-02"
+        releaseDatePrecision: { $ref: "#/components/schemas/DatePrecision" }
+
+    Product:
+      type: object
+      required:
+        [slug, name, vendor, category, releaseType, officialSources, lastVerifiedAt]
+      properties:
+        slug: { type: string, example: mikrotik-routeros }
+        name: { type: string, example: RouterOS }
+        vendor: { $ref: "#/components/schemas/VendorSummary" }
+        family:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/ProductSummary" }
+        category: { type: string, example: network_device_os }
+        releaseType: { type: string, example: embedded_os }
+        latestRelease:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/ReleaseSummary" }
+        officialSources:
+          type: array
+          items: { $ref: "#/components/schemas/OfficialSource" }
+        lastVerifiedAt: { type: string, format: date-time }
+
+    Evidence:
+      type: object
+      required: [retrievedAt, excerpt]
+      properties:
+        retrievedAt: { type: string, format: date-time }
+        excerpt:
+          type: string
+          maxLength: 500
+          description: A concise excerpt kept for verification, never a full document.
+
+    ReleaseSource:
+      type: object
+      required: [official, url, kind]
+      properties:
+        official: { type: boolean }
+        url: { type: string, format: uri }
+        kind: { $ref: "#/components/schemas/SourceKind" }
+
+    Release:
+      type: object
+      required:
+        - id
+        - product
+        - rawVersion
+        - normalizedVersion
+        - releaseType
+        - channel
+        - releaseDatePrecision
+        - recommended
+        - withdrawn
+        - correctsReleaseId
+        - source
+        - evidence
+        - firstObservedAt
+        - lastVerifiedAt
+      properties:
+        id: { type: string, example: "rel_01J8Z3K9QWERTYUIOPASDFGH" }
+        product: { $ref: "#/components/schemas/ProductSummary" }
+        rawVersion: { type: string, example: "7.24.2" }
+        normalizedVersion: { type: string, example: "7.24.2" }
+        releaseType: { type: string, example: embedded_os }
+        channel: { $ref: "#/components/schemas/Channel" }
+        releaseDate:
+          type: string
+          description: >-
+            Rendered per releaseDatePrecision; omitted entirely when
+            precision is "unknown". Never an invented day or month.
+          example: "2026-09-02"
+        releaseDatePrecision: { $ref: "#/components/schemas/DatePrecision" }
+        recommended:
+          type: ["boolean", "null"]
+          description: >-
+            null unless the vendor explicitly designated this version as
+            recommended. Never inferred by picking the newest release.
+        withdrawn: { type: boolean }
+        correctsReleaseId:
+          oneOf:
+            - { type: "null" }
+            - { type: string }
+        source: { $ref: "#/components/schemas/ReleaseSource" }
+        evidence: { $ref: "#/components/schemas/Evidence" }
+        firstObservedAt: { type: string, format: date-time }
+        lastVerifiedAt: { type: string, format: date-time }
+
+    ReleaseListResponse:
+      type: object
+      required: [releases, pagination]
+      properties:
+        releases:
+          type: array
+          items: { $ref: "#/components/schemas/Release" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    LatestReleaseResponse:
+      type: object
+      required: [vendor, product, latestRelease]
+      properties:
+        vendor: { $ref: "#/components/schemas/VendorSummary" }
+        product: { $ref: "#/components/schemas/ProductSummary" }
+        latestRelease: { $ref: "#/components/schemas/Release" }
+
+    SearchResultItem:
+      type: object
+      required: [type, slug, name, matchedOn]
+      properties:
+        type:
+          type: string
+          enum: [product, vendor]
+        slug: { type: string }
+        name: { type: string }
+        vendor:
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/VendorSummary" }
+        matchedOn:
+          type: string
+          enum: [name, alias, vendor]
+
+    SearchResponse:
+      type: object
+      required: [results, pagination]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/SearchResultItem" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    Pagination:
+      type: object
+      required: [nextCursor]
+      properties:
+        nextCursor:
+          oneOf:
+            - { type: "null" }
+            - { type: string }
+          description: >-
+            Opaque cursor token, or null when the list is exhausted. Never
+            constructed or decoded by a consumer.
+
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unavailable]
+
+    Problem:
+      type: object
+      description: RFC 9457 application/problem+json.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://firmscout.dev/problems/not-found"
+        title: { type: string, example: "Resource not found" }
+        status: { type: integer, example: 404 }
+        detail: { type: string }
+        instance: { type: string }
+        requestId:
+          type: string
+          description: FirmScout extension member, equal to the X-Request-Id header.

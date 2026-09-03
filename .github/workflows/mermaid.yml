@@ -1,0 +1,49 @@
+name: Mermaid Diagrams
+
+# Every architecture diagram in this repository is validated with Mermaid's own parser
+# on each change to a Markdown file. A diagram that does not parse renders as an error
+# box on GitHub, which is worse than no diagram, so this is a blocking check.
+#
+# Validation deliberately does NOT use @mermaid-js/mermaid-cli: that pulls Puppeteer
+# and a Chromium download, which fails in many sandboxed environments and leaves the
+# check silently skipped. scripts/mermaid-parse.mjs runs the real grammar in jsdom
+# instead, so it either validates or fails loudly.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '**/*.md'
+      - 'scripts/mermaid-parse.mjs'
+      - 'scripts/check-mermaid.sh'
+      - 'package.json'
+      - '.github/workflows/mermaid.yml'
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'scripts/mermaid-parse.mjs'
+      - 'scripts/check-mermaid.sh'
+      - 'package.json'
+      - '.github/workflows/mermaid.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  mermaid:
+    name: Validate Mermaid diagrams
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install validation dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Validate every mermaid block
+        run: node scripts/mermaid-parse.mjs .

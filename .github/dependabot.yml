@@ -1,0 +1,45 @@
+version: 2
+updates:
+  # Go modules at repo root
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '03:00'
+    open-pull-requests-limit: 5
+    reviewers:
+      - macimottin
+
+  # npm in apps/web
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule:
+      interval: weekly
+      day: monday
+      time: '03:30'
+    open-pull-requests-limit: 5
+    reviewers:
+      - macimottin
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:00'
+    open-pull-requests-limit: 5
+    reviewers:
+      - macimottin
+
+  # Docker images in infrastructure/docker
+  - package-ecosystem: docker
+    directory: /infrastructure/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:30'
+    open-pull-requests-limit: 5
+    reviewers:
+      - macimottin

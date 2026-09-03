@@ -1,0 +1,79 @@
+name: Data correction
+description: Report an incorrect published fact — a wrong version, date, release type, or similar.
+title: "[Correction]: "
+labels: ["data-correction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you — accuracy is the whole point of this project, and reports
+        like this are how it stays accurate. Please read
+        `docs/collectors/dataset-correction-policy.md` for how this is
+        handled: published facts are never edited or deleted, only
+        corrected with a new, evidenced entry, or withdrawn.
+
+        **Evidence matters more than confidence.** "I'm sure this is wrong"
+        without a source is treated as a lead, not a correction — please
+        include something citable.
+  - type: input
+    id: product_or_release
+    attributes:
+      label: Product or release
+      description: The product slug, release ID, or a link to the page/API response showing the incorrect fact.
+      placeholder: "mikrotik-routeros, release 7.24.2 dated 2026-09-02"
+    validations:
+      required: true
+  - type: input
+    id: field
+    attributes:
+      label: Which field is wrong?
+      placeholder: "releaseDate"
+    validations:
+      required: true
+  - type: input
+    id: current_value
+    attributes:
+      label: Current (incorrect) value
+    validations:
+      required: true
+  - type: input
+    id: correct_value
+    attributes:
+      label: What it should be
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: A source URL, a screenshot with a visible date, an archived page, or another citable reference. See "Evidence requirements" in `docs/collectors/dataset-correction-policy.md`.
+    validations:
+      required: true
+  - type: dropdown
+    id: correction_type
+    attributes:
+      label: What kind of correction is this?
+      options:
+        - A field value is wrong (date, version, channel, release type, etc.)
+        - This release shouldn't be published at all (withdrawal)
+        - This is a duplicate of another release / alias issue
+        - The source's quality classification is wrong
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: how_found
+    attributes:
+      label: How did you find this?
+      description: Direct experience deploying the release, a vendor changelog that disagrees, a mismatch you noticed, etc.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I've included citable evidence, not just an assertion.
+          required: true
+        - label: I understand this will result in a new, evidenced entry or a withdrawal — never a silent edit to the existing record.
+          required: true

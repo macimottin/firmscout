@@ -1,0 +1,8 @@
+{
+  "collectorId": "mikrotik.changelogs",
+  "note": "SYNTHETIC. The page was restructured and div.changelog-header no longer exists. Zero candidates, no error, and a warning naming the selector that missed.",
+  "warningsContain": [
+    "release_container \"div.changelog-header\" matched no elements"
+  ],
+  "candidates": []
+}

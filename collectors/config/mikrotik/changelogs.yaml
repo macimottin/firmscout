@@ -1,0 +1,113 @@
+# =============================================================================
+# Collector: MikroTik RouterOS changelog page
+# =============================================================================
+# Source registration: dataset/sources/mikrotik/changelogs.yaml, which ships
+# enabled: false pending the ADR-0018 terms review. This config describes how
+# the page would be read; it does not authorise reading it.
+#
+# Page structure, measured 2026-09-03 (46 entries, all of this shape):
+#
+#   <div class="flex items-center gap-4 py-3 changelog-header">
+#     <i class="ti ti-chevron-down ..."></i>
+#     <div class="grow"><div class="..."><div class="flex gap-4 items-center">
+#       <span class="mtk-text-sm font-bold min-w-20"> 7.23.4 </span>
+#       <div class="flex gap-1 text-[10px] font-bold text-white uppercase ...">
+#         <div class="rounded-[4px] bg-green p-1"> Long-term </div>
+#       </div>
+#       ... 2026-09-03 ...
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+
+metadata:
+  id: mikrotik.changelogs
+  vendor: mikrotik
+  version: 1
+
+spec:
+  engine: html_selectors
+
+  product_match:
+    product: mikrotik-routeros
+
+  fetch:
+    expected_content_type: text/html
+    max_bytes: 2097152 # 2 MiB; the real page is ~409 KB
+    timeout_seconds: 30
+    # Measured: no ETag, and cache-control: private. A conditional request has
+    # nothing to be conditional on, so change detection falls back to hashing
+    # the normalised section below.
+    conditional: none
+
+  normalize:
+    # Hash only the changelog entries. The rest of the ~409 KB page carries
+    # framework-generated, per-request attributes; hashing it would report a
+    # change on every single check.
+    section_selector: "div.changelog-header"
+
+    # NOTE on framework attributes: collector-config-spec.md §8.1's example also
+    # lists "[wire\\:id]" and "[x-data]" here. This config deliberately does not.
+    # `strip` removes *elements* matching a selector, and on this page the
+    # Livewire/Alpine attributes sit on the wrappers that contain the changelog
+    # entries -- stripping those selectors would delete the very entries being
+    # extracted. Volatile attributes do not affect text extraction; suppressing
+    # them for hashing purposes is the Normalizer's job, and the section
+    # selector above already excludes the parts of the page that churn.
+    strip:
+      - script
+      - style
+      - noscript
+
+  extract:
+    release_container: "div.changelog-header"
+
+    fields:
+      version:
+        # The entry's own version span. .First() inside each container, so the
+        # bold text in the channel badge (a div, not a span) cannot be mistaken
+        # for it.
+        selector: "span.font-bold"
+        transform: trim
+
+      channel:
+        # The badge wrapper carries the stable class "uppercase"; the badge
+        # itself is its only child. Selecting by the badge's own colour class
+        # (bg-green, bg-blue, ...) would break the moment MikroTik recoloured a
+        # channel, which is a styling change, not a data change.
+        selector: "div.uppercase > div"
+        transform: [trim, lowercase]
+        # An unmapped badge label is a hard error for that candidate, never a
+        # pass-through. A label nobody has interpreted is not evidence for any
+        # channel, and guessing is how an unreviewed development build ends up
+        # presented as stable.
+        map:
+          long-term: long_term
+          stable: stable
+          testing: testing
+          development: development
+
+      release_date:
+        # The date is plain text inside the entry with no class of its own, so
+        # the regex reads it from the container's whole text.
+        selector: ":scope"
+        regex: "(\\d{4}-\\d{2}-\\d{2})"
+        date_format: "2006-01-02"
+        # exact_day is correct here and only here: the page genuinely publishes
+        # full YYYY-MM-DD dates, matched exactly by the regex above. An entry
+        # whose date does not match produces an unknown date, never a guess.
+        precision: exact_day
+
+    release_type: embedded_os
+
+    evidence_excerpt: ":scope"
+
+    confidence:
+      # 0.9, not 1.0: a selector matching proves the page still looks the way it
+      # did, not that the extracted fact is correct.
+      base: 0.9
+      missing_optional_penalty: 0.1
+
+  schedule:
+    check_frequency_seconds: 21600 # four times a day
+    min_frequency_seconds: 3600

@@ -1,0 +1,86 @@
+# =============================================================================
+# Collector: MikroTik RouterOS "newest stable" pointer file
+# =============================================================================
+# Source registration: dataset/sources/mikrotik/newest-stable.yaml, which ships
+# enabled: false pending the ADR-0018 terms review. This config describes how
+# the endpoint would be read; it does not authorise reading it.
+#
+# Measured 2026-09-03:
+#   GET https://upgrade.mikrotik.com/routeros/NEWESTa7.stable
+#     Content-Type: text/plain
+#     body: "7.24.2 1788429434"   (version, one space, a Unix epoch)
+#     ETag and Last-Modified both present.
+#
+# This is the cheapest watcher in the fleet: a conditional GET against a body of
+# a few bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+
+metadata:
+  id: mikrotik.newest-stable
+  vendor: mikrotik
+  version: 1
+
+spec:
+  engine: text_regex
+
+  product_match:
+    product: mikrotik-routeros
+
+  fetch:
+    expected_content_type: text/plain
+    # The body is a handful of bytes; 4 KiB is headroom, not an expectation.
+    max_bytes: 4096
+    timeout_seconds: 15
+    # Both ETag and Last-Modified are sent; auto prefers the ETag.
+    conditional: auto
+
+  extract:
+    # The whole body is one container: a version token, one space, an epoch.
+    # The named groups are addressed directly by the fields below, so no field
+    # needs its own regex to re-split the same text.
+    release_container: "(?P<version>\\S+)[ \\t]+(?P<epoch>\\d+)"
+
+    fields:
+      version:
+        selector: version # the named capture group above
+        transform: trim
+
+      # NO release_date FIELD -- this is deliberate. See the note below.
+      #
+      # The body's second token (1788429434) is an epoch, precise to the second,
+      # and it is tempting to publish it as an exact-day release date. MikroTik
+      # does not document what it means. It is most likely the moment this
+      # pointer file last changed, which is close to but not the same thing as
+      # the release date, and "most likely" is precisely the reasoning this
+      # project forbids itself.
+      #
+      # collector-config-spec.md §8.2 previously argued for `year_only` here.
+      # That is the same inference made coarser: it still asserts the source
+      # told us a year, which it did not. The honest precision for an
+      # undocumented value is to publish no date at all.
+      #
+      # Nothing is lost. The epoch is retained verbatim in the evidence excerpt
+      # below, so a reviewer can see it and a later decision can promote it. And
+      # the changelog collector (mikrotik.changelogs) reads MikroTik's own
+      # published YYYY-MM-DD dates, so this product is dated by the source that
+      # actually states a date. Where two sources produce candidates for the
+      # same version, gate 10 reconciles them (blueprint §16).
+
+    release_type: embedded_os
+
+    # MikroTik documents this endpoint as the pointer for the "stable" channel
+    # specifically, so the channel is fixed rather than extracted.
+    channel: stable
+
+    evidence_excerpt: ":scope"
+
+    confidence:
+      base: 0.9
+      missing_optional_penalty: 0.1
+
+  schedule:
+    check_frequency_seconds: 3600 # hourly; an unchanged check costs one 304
+    min_frequency_seconds: 600

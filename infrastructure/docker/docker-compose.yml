@@ -1,0 +1,405 @@
+# FirmScout local development stack.
+#
+# See infrastructure/docker/README.md for how to run this, what each service
+# is for, and what has (and has not) been verified in this environment --
+# Docker itself was not available while this file was authored, so it has
+# never actually been brought up. Treat it as reviewed-but-unexecuted.
+#
+# Default profile (`docker compose up`): postgres, migrate, api, worker, web.
+# `observability` profile (`docker compose --profile observability up`) adds:
+# otel-collector, prometheus, loki, tempo, grafana.
+#
+# Build context for every FirmScout-built image is the repository root
+# (`../..` from this file), because the Go build needs go.mod/go.sum and the
+# full module tree, and the web build needs apps/web/.
+
+networks:
+  firmscout:
+    name: firmscout
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: firmscout_postgres_data
+  prometheus_data:
+    name: firmscout_prometheus_data
+  loki_data:
+    name: firmscout_loki_data
+  tempo_data:
+    name: firmscout_tempo_data
+  grafana_data:
+    name: firmscout_grafana_data
+
+services:
+  # -------------------------------------------------------------------------
+  # Stateful dependency: the database, the job queue, and the artifact
+  # metadata store all live here (blueprint §18).
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:17.6-alpine
+    container_name: firmscout-postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-firmscout}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-firmscout-dev-only-not-a-real-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-firmscout}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # docker-entrypoint-initdb.d scripts run once, only against a fresh
+      # (empty) data volume. See postgres/init/01-extensions.sql -- creates
+      # pg_trgm ahead of migrations. Redundant with (but harmless alongside)
+      # the CREATE EXTENSION IF NOT EXISTS already in
+      # database/migrations/00001_initial.sql.
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-firmscout} -d ${POSTGRES_DB:-firmscout}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # -------------------------------------------------------------------------
+  # One-shot migration runner. Depending on this (with
+  # service_completed_successfully) is what lets api/worker assume schema
+  # exists without a manual `make migrate` step on a fresh clone.
+  #
+  # ASSUMPTION: apps/cli exposes a `migrate up` subcommand -- apps/cli/main.go
+  # does not exist yet. scripts/dev.sh currently calls `go run ./apps/cli
+  # migrate` (no `up`); if the CLI ships with a single-word `migrate`
+  # subcommand instead of `migrate up`, change the `command:` below to match.
+  # -------------------------------------------------------------------------
+  migrate:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/go.Dockerfile
+      args:
+        BINARY: cli
+        VERSION: ${FIRMSCOUT_VERSION:-dev}
+    image: firmscout/cli:${FIRMSCOUT_VERSION:-dev}
+    container_name: firmscout-migrate
+    command: ["migrate", "up"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      FIRMSCOUT_DATABASE_URL: postgres://${POSTGRES_USER:-firmscout}:${POSTGRES_PASSWORD:-firmscout-dev-only-not-a-real-secret}@postgres:5432/${POSTGRES_DB:-firmscout}?sslmode=disable
+      FIRMSCOUT_LOG_LEVEL: ${FIRMSCOUT_LOG_LEVEL:-info}
+    networks:
+      - firmscout
+
+  # -------------------------------------------------------------------------
+  # Go HTTP API (blueprint §18, docs/architecture/api.md).
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/go.Dockerfile
+      args:
+        BINARY: api
+        VERSION: ${FIRMSCOUT_VERSION:-dev}
+    image: firmscout/api:${FIRMSCOUT_VERSION:-dev}
+    container_name: firmscout-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      FIRMSCOUT_DATABASE_URL: postgres://${POSTGRES_USER:-firmscout}:${POSTGRES_PASSWORD:-firmscout-dev-only-not-a-real-secret}@postgres:5432/${POSTGRES_DB:-firmscout}?sslmode=disable
+      FIRMSCOUT_HTTP_ADDR: ":8080"
+      FIRMSCOUT_LOG_LEVEL: ${FIRMSCOUT_LOG_LEVEL:-info}
+      # OTLP export always points at the Collector's Compose service name.
+      # If the `observability` profile isn't running, these calls simply
+      # fail to connect; OTel SDKs are designed to drop telemetry and keep
+      # the application running rather than fail the request, so `api`
+      # starts and serves traffic normally either way -- see README.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: firmscout-api
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${FIRMSCOUT_ENV:-local},service.namespace=firmscout
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      # gcr.io/distroless/static-debian12 (go.Dockerfile's final stage) has
+      # no shell and no curl/wget -- see the HEALTHCHECK note in
+      # go.Dockerfile. This assumes apps/api implements a `healthcheck`
+      # subcommand that performs a local, dependency-free HTTP GET against
+      # its own /healthz and exits 0/non-zero accordingly, so Compose can
+      # probe it with a plain exec-form CMD (no shell required). This is an
+      # assumption about a CLI surface that does not exist yet -- if
+      # apps/api ships without it, replace this healthcheck with `disable:
+      # true` and rely on the host-side `curl -f http://localhost:8080/healthz`
+      # smoke check in README.md / definition-of-done.md instead.
+      test: ["CMD", "/firmscout", "healthcheck", "--url=http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  # -------------------------------------------------------------------------
+  # Scheduler loop + job runner (blueprint §18). Same image family as `api`,
+  # different BINARY and no published API port -- ASSUMPTION: worker exposes
+  # a small internal HTTP server (port 9090) for /metrics and /healthz only,
+  # since docs/architecture/observability.md requires Prometheus to scrape
+  # "the api and worker /metrics endpoints" and this brief requires a worker
+  # healthcheck. apps/worker/main.go does not exist yet.
+  # -------------------------------------------------------------------------
+  worker:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/go.Dockerfile
+      args:
+        BINARY: worker
+        VERSION: ${FIRMSCOUT_VERSION:-dev}
+    image: firmscout/worker:${FIRMSCOUT_VERSION:-dev}
+    container_name: firmscout-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - .env
+    environment:
+      FIRMSCOUT_DATABASE_URL: postgres://${POSTGRES_USER:-firmscout}:${POSTGRES_PASSWORD:-firmscout-dev-only-not-a-real-secret}@postgres:5432/${POSTGRES_DB:-firmscout}?sslmode=disable
+      FIRMSCOUT_METRICS_ADDR: ":9090"
+      FIRMSCOUT_LOG_LEVEL: ${FIRMSCOUT_LOG_LEVEL:-info}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: firmscout-worker
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${FIRMSCOUT_ENV:-local},service.namespace=firmscout
+    expose:
+      - "9090"
+    healthcheck:
+      # Same distroless caveat and same `healthcheck` subcommand assumption
+      # as the `api` service above, aimed at the worker's own /healthz.
+      test: ["CMD", "/firmscout", "healthcheck", "--url=http://127.0.0.1:9090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  # -------------------------------------------------------------------------
+  # Next.js public site (blueprint §18).
+  # -------------------------------------------------------------------------
+  web:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/web.Dockerfile
+      args:
+        FIRMSCOUT_API_URL: http://api:8080
+    image: firmscout/web:${FIRMSCOUT_VERSION:-dev}
+    container_name: firmscout-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      FIRMSCOUT_API_URL: http://api:8080
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: firmscout-web
+      OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${FIRMSCOUT_ENV:-local},service.namespace=firmscout
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    # web.Dockerfile already bakes in a HEALTHCHECK (plain Alpine image has
+    # wget available), so no override is declared here.
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  # =========================================================================
+  # Observability profile. `docker compose --profile observability up`
+  # starts these four in addition to the default five, per blueprint §18's
+  # stated reason: a contributor working on a collector runs four containers
+  # instead of nine, not the whole stack.
+  # =========================================================================
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    container_name: firmscout-otel-collector
+    restart: unless-stopped
+    profiles: ["observability"]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ../observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    environment:
+      FIRMSCOUT_ENV: ${FIRMSCOUT_ENV:-local}
+    ports:
+      - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"   # OTLP gRPC receiver
+      - "${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"   # OTLP HTTP receiver
+      - "${OTEL_COLLECTOR_METRICS_PORT:-8888}:8888" # Collector's own metrics
+      - "${OTEL_COLLECTOR_APP_METRICS_PORT:-8889}:8889" # Application metrics (prometheus exporter)
+    healthcheck:
+      # The contrib distribution's default config path includes the
+      # `health_check` extension listening on 13133; not verified against a
+      # running container in this environment.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:13133"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    container_name: firmscout-prometheus
+    restart: unless-stopped
+    profiles: ["observability"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: firmscout-loki
+    restart: unless-stopped
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ../observability/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: firmscout-tempo
+    restart: unless-stopped
+    profiles: ["observability"]
+    command: ["-config.file=/etc/tempo/tempo-config.yaml"]
+    volumes:
+      - ../observability/tempo/tempo-config.yaml:/etc/tempo/tempo-config.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "${TEMPO_HTTP_PORT:-3200}:3200" # Tempo query API, used by Grafana's datasource
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3200/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: firmscout-grafana
+    restart: unless-stopped
+    profiles: ["observability"]
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-firmscout-dev-only-not-a-real-secret}
+      # Dashboards and datasources are provisioned as code (below); nothing
+      # is ever configured by hand through the UI -- blueprint §18/§21.
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - firmscout
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M

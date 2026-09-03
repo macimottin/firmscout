@@ -1,0 +1,67 @@
+# =============================================================================
+# Source: MikroTik RouterOS "newest stable" pointer file
+# =============================================================================
+# Measured 2026-09-03:
+#   GET https://upgrade.mikrotik.com/routeros/NEWESTa7.stable
+#     -> Content-Type: text/plain
+#     -> body exactly "7.24.2 1788429434" (a version, one space, a Unix epoch)
+#     -> serves BOTH an ETag and a Last-Modified header
+#   GET https://mikrotik.com/robots.txt
+#     -> "User-agent: *" with an empty "Disallow:", i.e. nothing is disallowed.
+#
+# This is the cheapest possible watcher: a conditional GET against a body of a
+# few bytes, answered with 304 on every check that finds no new release.
+#
+# source_type is rest_api, not json_endpoint: the endpoint returns plain text,
+# and labelling it JSON would make the type field a guess rather than a
+# description. It is not html_page either -- the type drives which engines may
+# handle it and which change signals are available, and both of those are the
+# API-shaped ones here.
+#
+# ------------------------------- ADR-0018 ------------------------------------
+# This source ships with enabled: false and terms_review_status: pending because
+# ADR-0018 requires a human to review the site's terms of use before any
+# collection happens. robots_policy_status is a mechanical, measured fact;
+# terms_review_status is a human judgement that has not yet been made. Neither
+# this file nor the collector config may enable collection until it has been.
+# -----------------------------------------------------------------------------
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: newest-stable
+  vendor: mikrotik
+
+spec:
+  product: mikrotik-routeros
+  source_type: rest_api
+  url: https://upgrade.mikrotik.com/routeros/NEWESTa7.stable
+
+  # Authority
+  official: true
+  quality_class: official_manufacturer
+
+  # Compliance -- see the ADR-0018 note above.
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-03T00:00:00Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: a human must review mikrotik.com's terms of use before this source
+    is enabled. robots.txt permits the path (measured 2026-09-03), but robots
+    permission alone is not sufficient.
+  authentication_type: none
+
+  # Not collected from until the terms review above is complete.
+  enabled: false
+  health: pending_review
+
+  # Collection
+  collector_id: mikrotik.newest-stable
+  expected_content_type: text/plain
+
+  # Hourly. The response is a few bytes and an unchanged check costs one 304, so
+  # this cadence is close to free -- which is exactly why it is the source that
+  # gets checked often and the 409 KB changelog page is the one that does not.
+  check_frequency_seconds: 3600
+  min_frequency_seconds: 600

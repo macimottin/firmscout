@@ -1,0 +1,50 @@
+<!--
+  SYNTHETIC FIXTURE -- not a recording of any real response.
+
+  Purpose: the vendor introduces a channel badge nobody has interpreted yet
+  ("Nightly"). collector-config-spec.md §3.6 requires this to be a hard error for
+  that candidate, not a pass-through: an unmapped label is not evidence for any
+  channel, and guessing is how an unreviewed build reaches a stable feed.
+
+  The second entry uses a known badge, proving the failure is scoped to the
+  candidate that carried the unknown label.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Changelogs</title>
+  <style>.changelog-header { display: flex; }</style>
+  <script>window.__BUILD__ = { version: "9.99.9" };</script>
+</head>
+<body>
+
+<nav class="topbar"><a href="/download/changelogs" class="font-bold">Changelogs</a></nav>
+
+<main class="container">
+
+  <div class="flex items-center gap-4 py-3 changelog-header">
+    <i class="ti ti-chevron-down text-lg"></i>
+    <div class="grow"><div class="flex items-center justify-between"><div class="flex gap-4 items-center">
+      <span class="mtk-text-sm font-bold min-w-20"> 7.25.0 </span>
+      <div class="flex gap-1 text-[10px] font-bold text-white uppercase leading-none">
+        <div class="rounded-[4px] bg-purple p-1"> Nightly </div>
+      </div>
+      <span class="mtk-text-sm text-gray-500"> 2026-09-01 </span>
+    </div></div></div>
+  </div>
+
+  <div class="flex items-center gap-4 py-3 changelog-header">
+    <i class="ti ti-chevron-down text-lg"></i>
+    <div class="grow"><div class="flex items-center justify-between"><div class="flex gap-4 items-center">
+      <span class="mtk-text-sm font-bold min-w-20"> 7.24.2 </span>
+      <div class="flex gap-1 text-[10px] font-bold text-white uppercase leading-none">
+        <div class="rounded-[4px] bg-blue p-1"> Stable </div>
+      </div>
+      <span class="mtk-text-sm text-gray-500"> 2026-09-03 </span>
+    </div></div></div>
+  </div>
+
+</main>
+
+</body>
+</html>

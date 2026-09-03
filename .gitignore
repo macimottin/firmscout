@@ -1,0 +1,33 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+# Compiled binaries left at the repository root by `go build` without -o.
+/api
+/cli
+/worker
+/firmscout
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+# Env / secrets
+.env
+.env.*
+!.env.example
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+# Local data
+/infrastructure/docker/data/
+/tmp/
+# Artifact blobs written by a local run of the collector pipeline.
+/.artifacts/

@@ -1,0 +1,51 @@
+{
+  "collectorId": "mikrotik.changelogs",
+  "note": "Recorded excerpt of https://mikrotik.com/download/changelogs, retrieved 2026-09-03. Three of the page's 46 entries. Dates are exact_day because the page publishes full YYYY-MM-DD dates.",
+  "candidates": [
+    {
+      "rawVersion": "7.23.4",
+      "normalizedVersion": "7.23.4",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-09-03"
+      },
+      "releaseType": "embedded_os",
+      "channel": "long_term",
+      "applicability": {
+        "productHint": "mikrotik-routeros"
+      },
+      "evidenceExcerptContains": "7.23.4 Long-term 2026-09-03",
+      "confidenceAtLeast": 0.9
+    },
+    {
+      "rawVersion": "7.21.5",
+      "normalizedVersion": "7.21.5",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-07-06"
+      },
+      "releaseType": "embedded_os",
+      "channel": "long_term",
+      "applicability": {
+        "productHint": "mikrotik-routeros"
+      },
+      "evidenceExcerptContains": "7.21.5 Long-term 2026-07-06",
+      "confidenceAtLeast": 0.9
+    },
+    {
+      "rawVersion": "7.21.4",
+      "normalizedVersion": "7.21.4",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-04-21"
+      },
+      "releaseType": "embedded_os",
+      "channel": "long_term",
+      "applicability": {
+        "productHint": "mikrotik-routeros"
+      },
+      "evidenceExcerptContains": "7.21.4 Long-term 2026-04-21",
+      "confidenceAtLeast": 0.9
+    }
+  ]
+}

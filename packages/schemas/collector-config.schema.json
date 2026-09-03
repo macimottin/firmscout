@@ -1,0 +1,379 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firmscout.dev/schemas/collector-config.schema.json",
+  "title": "FirmScout configuration-driven collector",
+  "description": "A declarative collector. It contains no executable code, names no external program, and cannot cause a second network request, which is what makes a community-contributed collector reviewable by reading it. See ADR-0005 and docs/architecture/collector-config-spec.md.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "firmscout.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "CollectorConfig"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "id",
+        "vendor",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+          "maxLength": 200,
+          "description": "Stable identifier referenced by a source's collector_id, conventionally `<vendor>.<source>`."
+        },
+        "vendor": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Bumped on any behavioural change. The version is recorded in every piece of evidence, so a past extraction can always be explained."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "engine",
+        "extract"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "enum": [
+            "html_selectors",
+            "text_regex",
+            "json_path",
+            "rss_atom",
+            "xml_xpath",
+            "pdf_text",
+            "github_releases"
+          ],
+          "description": "html_selectors and text_regex are implemented. The others are declared so a roadmap config fails validation with a clear message rather than a parse error."
+        },
+        "product_match": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "product": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+            },
+            "family": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+            }
+          }
+        },
+        "fetch": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "expected_content_type": {
+              "type": "string"
+            },
+            "max_bytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 67108864
+            },
+            "timeout_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Extra request headers. Must never carry a credential: FirmScout does not authenticate to sources it has not been given explicit access to."
+            },
+            "conditional": {
+              "type": "string",
+              "description": "Which conditional-request validators to use: etag, last_modified, both or none."
+            }
+          }
+        },
+        "normalize": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "section_selector": {
+              "type": "string"
+            },
+            "strip": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "replace": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "pattern"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "with": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extract": {
+          "type": "object",
+          "required": [
+            "fields"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "release_container": {
+              "type": "string",
+              "description": "Selector for the repeating element holding one release. Required for html_selectors."
+            },
+            "pattern": {
+              "type": "string",
+              "description": "RE2 regular expression with named capture groups. Required for text_regex."
+            },
+            "fields": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "enum": [
+                  "version",
+                  "normalized_version",
+                  "release_date",
+                  "publication_date",
+                  "channel",
+                  "product_hint",
+                  "hardware_revision",
+                  "region",
+                  "deployment_mode",
+                  "release_notes_url",
+                  "evidence_excerpt",
+                  "release_type"
+                ]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/field"
+              },
+              "required": [
+                "version"
+              ]
+            },
+            "release_type": {
+              "enum": [
+                "firmware",
+                "bios",
+                "bmc_firmware",
+                "driver",
+                "operating_system",
+                "embedded_os",
+                "application_software",
+                "saas_release",
+                "management_platform",
+                "security_update",
+                "documentation_only",
+                "unknown"
+              ],
+              "description": "There is no default. A collector either determines the type or emits `unknown` and routes to classification."
+            },
+            "channel": {
+              "type": "string"
+            },
+            "applicability": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "hardware_revision": {
+                  "type": "string"
+                },
+                "region": {
+                  "type": "string"
+                },
+                "deployment_mode": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            },
+            "evidence_excerpt": {
+              "type": "string",
+              "description": "Selector for the text quoted as evidence. A concise excerpt for verification, never a reproduction of the page."
+            },
+            "confidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "base": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "missing_optional_penalty": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            },
+            "max_candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000
+            }
+          }
+        },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "check_frequency_seconds": {
+              "type": "integer",
+              "minimum": 60
+            },
+            "min_frequency_seconds": {
+              "type": "integer",
+              "minimum": 60
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "selector": {
+          "type": "string",
+          "description": "CSS selector relative to the release container. `:scope` means the container element itself."
+        },
+        "attribute": {
+          "type": "string",
+          "description": "Read this attribute instead of the element's text."
+        },
+        "group": {
+          "type": "string",
+          "description": "Named capture group, for the text_regex engine."
+        },
+        "regex": {
+          "type": "string",
+          "description": "Extract the first capture group from the selected text. Evaluated with Go's RE2 engine, so catastrophic backtracking is not a possible failure mode."
+        },
+        "transform": {
+          "description": "A single transform or an ordered pipeline. Named transforms take no argument; object forms carry one.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/transform"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/transform"
+              }
+            }
+          ]
+        },
+        "map": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Look the extracted value up in this table, for example mapping a badge reading `Long-term` onto the channel `long_term`."
+        },
+        "date_format": {
+          "type": "string",
+          "description": "A Go reference-time layout such as `2006-01-02`, or `epoch_seconds` for a Unix timestamp."
+        },
+        "precision": {
+          "enum": [
+            "exact_day",
+            "month_only",
+            "year_only",
+            "unknown"
+          ],
+          "description": "The precision this field can actually establish. A config that can only determine a month MUST declare month_only, and the collector will not invent a day. This is the single most consequential field in the file."
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "default": {
+          "type": "string"
+        }
+      }
+    },
+    "transform": {
+      "oneOf": [
+        {
+          "enum": [
+            "trim",
+            "lowercase",
+            "uppercase",
+            "collapse_whitespace"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "enum": [
+                "strip_prefix",
+                "strip_suffix",
+                "regex_extract",
+                "regex_replace",
+                "trim",
+                "lowercase",
+                "uppercase",
+                "collapse_whitespace"
+              ]
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "with": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

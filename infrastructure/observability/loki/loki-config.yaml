@@ -1,0 +1,102 @@
+# Loki configuration for FirmScout local development.
+#
+# DEVELOPMENT CONFIGURATION, NOT PRODUCTION. Single-binary (monolithic)
+# mode, in-memory ring, filesystem chunk/index storage under the
+# `loki_data` Compose volume. On AWS this becomes object storage (S3)
+# backing chunk storage per docs/architecture/observability.md §2's
+# local-vs-AWS table -- this file is not that config.
+#
+# auth_enabled: false because this is a single-tenant local deployment; no
+# X-Scope-OrgID header is required from the Collector's otlphttp exporter.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  grpc_server_max_concurrent_streams: 1000
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+# Retention per docs/architecture/observability.md §9: logs kept 14 days
+# locally. The compactor is what actually enforces retention_period below;
+# without `retention_enabled: true` on the compactor, `limits_config`'s
+# figure is advisory only and nothing is ever deleted.
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem
+  retention_enabled: true
+
+limits_config:
+  retention_period: 336h # 14 days
+  metric_aggregation_enabled: true
+
+  # Keeps Loki's stream labels to exactly the set
+  # docs/architecture/observability.md §6 specifies: `service_name`,
+  # `deployment_environment`, and `level` (from severity). Everything else
+  # an OTLP log record carries (request_id, trace_id, span_id, vendor,
+  # source_id, product_slug, candidate_id, ...) lands in structured metadata
+  # / the JSON log body instead, queried with `| json` pipeline stages, not
+  # baked into the stream identity -- the same cardinality discipline §5
+  # applies to Prometheus labels, applied here to Loki index labels.
+  # `ignore_defaults: true` is required because Loki's built-in default
+  # resource-attribute-to-label mapping is broader than this list.
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: true
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+            - deployment.environment.name
+    log_attributes:
+      - action: index_label
+        attributes:
+          - severity
+      - action: structured_metadata
+        regex: .*
+    scope_attributes:
+      - action: structured_metadata
+        regex: .*
+
+pattern_ingester:
+  enabled: true
+  metric_aggregation:
+    loki_address: localhost:3100
+
+frontend:
+  encoding: protobuf
+
+# Privacy-conscious default, matching FirmScout's own product-analytics
+# stance (blueprint §20): do not phone anonymous usage statistics home to
+# Grafana Labs from a self-hoster's or contributor's machine.
+analytics:
+  reporting_enabled: false

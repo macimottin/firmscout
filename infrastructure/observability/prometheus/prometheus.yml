@@ -1,0 +1,77 @@
+# Prometheus configuration for FirmScout local development.
+#
+# Loaded by the `prometheus` Compose service (observability profile) --
+# see infrastructure/docker/docker-compose.yml.
+
+global:
+  # Sane default for local development: frequent enough that dashboards
+  # (grafana-dashboards.md's 30s-refresh "API operations" dashboard
+  # especially) feel live, infrequent enough not to waste disk on a
+  # single-node local Postgres+two-Go-binary workload.
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # -------------------------------------------------------------------------
+  # firmscout-api / firmscout-worker: direct scrape of each binary's own
+  # Prometheus exposition endpoint.
+  #
+  # ASSUMPTION, documented because apps/api and apps/worker do not exist
+  # yet: each binary exposes a native `/metrics` handler (the standard OTel
+  # Go SDK's Prometheus bridge, or promhttp registered directly) in addition
+  # to sending traces/logs to the Collector over OTLP. This is a deliberate
+  # simplification relative to
+  # docs/architecture/observability.md §2's "the Collector is the only
+  # component that talks to the backends" framing, which describes metrics
+  # reaching Prometheus via the Collector's own `prometheus`/
+  # `prometheusremotewrite` exporter (see the `otel-collector-app-metrics`
+  # job below, which scrapes exactly that path and is the
+  # architecture-document-faithful alternative). Both jobs are included so
+  # this file works regardless of which of the two metrics paths apps/api
+  # and apps/worker end up implementing; a duplicate metric appearing under
+  # both `job` labels is expected and harmless in Prometheus (different
+  # `job` label value = different time series), and whichever endpoint
+  # doesn't exist yet simply scrapes as `down` without affecting the other.
+  - job_name: firmscout-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8080"]
+        labels:
+          service: firmscout-api
+
+  - job_name: firmscout-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:9090"]
+        labels:
+          service: firmscout-worker
+
+  # -------------------------------------------------------------------------
+  # The OTel Collector's own operational metrics (queue lengths, dropped
+  # spans, exporter errors/retries) -- self-monitoring of the pipeline
+  # itself, exposed via `service.telemetry.metrics` in
+  # otel-collector-config.yaml. Distinct from application-emitted
+  # `firmscout_*` metrics.
+  - job_name: otel-collector-self
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["otel-collector:8888"]
+        labels:
+          service: otel-collector
+
+  # Application-emitted `firmscout_*` metrics that arrived at the Collector
+  # over OTLP and were converted to Prometheus exposition format by the
+  # `prometheus` exporter in otel-collector-config.yaml. This is the path
+  # docs/architecture/observability.md §2 step 6 describes as authoritative
+  # ("Prometheus's own scrape of the Collector's ... exporter endpoint").
+  # See the comment on the firmscout-api/firmscout-worker jobs above for why
+  # both paths are scraped.
+  - job_name: otel-collector-app-metrics
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["otel-collector:8889"]
+        labels:
+          service: otel-collector

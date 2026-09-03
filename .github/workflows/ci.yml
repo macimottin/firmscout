@@ -1,0 +1,212 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    name: Go
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Guard: check if Go module exists
+      - name: Check for go.mod
+        id: check-go
+        run: |
+          if [ -f go.mod ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "go.mod not found, skipping Go checks"
+          fi
+
+      - name: Set up Go
+        if: steps.check-go.outputs.found == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+
+      - name: Run gofmt
+        if: steps.check-go.outputs.found == 'true'
+        run: |
+          output=$(gofmt -l .)
+          if [ -n "$output" ]; then
+            echo "gofmt found formatting issues:"
+            echo "$output"
+            exit 1
+          fi
+
+      - name: Run go vet
+        if: steps.check-go.outputs.found == 'true'
+        run: go vet ./...
+
+      - name: Run go build
+        if: steps.check-go.outputs.found == 'true'
+        run: go build ./...
+
+      - name: Run go test
+        if: steps.check-go.outputs.found == 'true'
+        run: go test ./... -race -count=1
+
+      - name: Run golangci-lint
+        if: steps.check-go.outputs.found == 'true'
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.13.2
+          args: --timeout=5m
+
+  sqlc:
+    runs-on: ubuntu-latest
+    name: SQLC
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Guard: check if sqlc.yaml exists
+      - name: Check for sqlc.yaml
+        id: check-sqlc
+        run: |
+          if [ -f sqlc.yaml ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "sqlc.yaml not found, skipping sqlc checks"
+          fi
+
+      - name: Set up Go
+        if: steps.check-sqlc.outputs.found == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+
+      - name: Install sqlc
+        if: steps.check-sqlc.outputs.found == 'true'
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+      - name: Run sqlc diff
+        if: steps.check-sqlc.outputs.found == 'true'
+        run: sqlc diff
+
+  postgres-tests:
+    runs-on: ubuntu-latest
+    name: PostgreSQL Tests
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Guard: check if Go module exists
+      - name: Check for go.mod
+        id: check-go
+        run: |
+          if [ -f go.mod ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "go.mod not found, skipping postgres tests"
+          fi
+
+      - name: Set up Go
+        if: steps.check-go.outputs.found == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+
+      - name: Run PostgreSQL integration tests
+        if: steps.check-go.outputs.found == 'true'
+        env:
+          FIRMSCOUT_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres?sslmode=disable
+        run: go test ./internal/adapters/postgres/... -count=1
+
+  web:
+    runs-on: ubuntu-latest
+    name: Web
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Guard: check if package.json exists
+      - name: Check for package.json
+        id: check-web
+        run: |
+          if [ -f package.json ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "package.json not found, skipping web checks"
+          fi
+
+      - name: Set up Node
+        if: steps.check-web.outputs.found == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.check-web.outputs.found == 'true'
+        run: npm ci
+
+      - name: Lint
+        if: steps.check-web.outputs.found == 'true'
+        run: npm run lint
+
+      - name: Type check
+        if: steps.check-web.outputs.found == 'true'
+        run: npm run typecheck
+
+      - name: Build
+        if: steps.check-web.outputs.found == 'true'
+        run: npm run build
+
+  arch:
+    runs-on: ubuntu-latest
+    name: Architecture Tests
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Guard: check if Go module exists
+      - name: Check for go.mod
+        id: check-go
+        run: |
+          if [ -f go.mod ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "go.mod not found, skipping arch tests"
+          fi
+
+      - name: Set up Go
+        if: steps.check-go.outputs.found == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: true
+
+      - name: Run architecture tests
+        if: steps.check-go.outputs.found == 'true'
+        run: go test ./internal/archtest/... -count=1

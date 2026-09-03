@@ -1,0 +1,45 @@
+<!--
+  SYNTHETIC FIXTURE -- not a recording of any real response.
+
+  Purpose: the vendor redesigns the page and div.changelog-header no longer
+  exists. The collector must extract zero candidates and return no error: a
+  layout change is a repair signal the application layer raises from the
+  source's history, not a crash inside extraction.
+
+  The markup below is deliberately plausible -- the same data, restructured into
+  a table -- rather than empty, so the test proves the selector missed rather
+  than that the parser was handed nothing.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Changelogs</title>
+  <style>.release-row { display: table-row; }</style>
+  <script>window.__BUILD__ = { version: "9.99.9" };</script>
+</head>
+<body>
+
+<nav class="topbar flex items-center gap-6">
+  <a href="/download/changelogs" class="font-bold">Changelogs</a>
+</nav>
+
+<main class="container">
+  <h1 class="font-bold">RouterOS changelogs</h1>
+  <table class="release-table">
+    <tbody>
+      <tr class="release-row">
+        <td class="font-bold">7.23.4</td>
+        <td class="uppercase">Long-term</td>
+        <td>2026-09-03</td>
+      </tr>
+      <tr class="release-row">
+        <td class="font-bold">7.21.5</td>
+        <td class="uppercase">Long-term</td>
+        <td>2026-07-06</td>
+      </tr>
+    </tbody>
+  </table>
+</main>
+
+</body>
+</html>

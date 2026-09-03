@@ -1,0 +1,163 @@
+# =============================================================================
+# FirmScout collector configuration — TEMPLATE
+# =============================================================================
+#
+# Copy this file to collectors/config/<vendor-slug>/<source-name>.yaml and fill
+# it in. Delete the comments you don't need; keep the ones that explain a
+# non-obvious choice you made, for the next person who edits this file.
+#
+# Before opening a pull request with a new or changed config:
+#   1. It must validate against packages/schemas/collector-config.schema.json
+#      (this runs automatically in CI, and locally via `firmscout collector
+#      validate <path>`, once that command exists).
+#   2. It must have at least one fixture under testdata/fixtures/<vendor>/...
+#      with a provenance README (source URL, retrieval timestamp, content
+#      hash) and an expected.json — see CONTRIBUTING.md.
+#   3. The source's compliance status must already be recorded honestly in
+#      dataset/sources/<vendor>/<source>.yaml — see DATA_SOURCES.md. A
+#      collector config for a source that isn't `enabled: true` there will
+#      not run in production regardless of what this file says.
+#
+# Full specification: docs/architecture/blueprint.md §14, and the worked
+# MikroTik example in docs/collectors/developing-collectors.md.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+
+metadata:
+  # Stable identifier for this collector. Convention: <vendor>.<what-it-is>.
+  # This ID is recorded on every candidate's evidence — do not rename it
+  # casually once it has produced published data; treat a rename as a new
+  # collector plus a deprecation of the old ID.
+  id: "example-vendor.changelog"
+
+  # Vendor slug, matching an entry in dataset/vendors/.
+  vendor: "example-vendor"
+
+  # Bump this integer whenever you change extraction *behavior* (a new
+  # field, a different selector, a changed date format) — not for cosmetic
+  # YAML formatting. It is recorded on every candidate this config produces,
+  # so a reviewer can tell which version of the logic ran.
+  version: 1
+
+spec:
+  # -------------------------------------------------------------------------
+  # Engine: which generic extraction engine interprets the `extract` block
+  # below. MVP engines: html_selectors, text_regex.
+  # Roadmap (not yet implemented — do not reference until it exists):
+  # json_path, rss_atom, xml_xpath, pdf_text, github_releases.
+  # -------------------------------------------------------------------------
+  engine: html_selectors
+
+  # -------------------------------------------------------------------------
+  # Which product(s) in the catalogue this source's candidates apply to.
+  # A source usually maps to exactly one product; if one source legitimately
+  # covers a whole product family, express that here instead of guessing per
+  # candidate — extraction does not resolve product identity on its own.
+  # -------------------------------------------------------------------------
+  product_match:
+    product: "example-vendor-example-product"   # slug from dataset/products/
+
+  # -------------------------------------------------------------------------
+  # Fetch: constraints applied by the SDK's shared Fetcher, before any
+  # parsing happens. These are defensive limits, not extraction logic.
+  # -------------------------------------------------------------------------
+  fetch:
+    # Reject the response outright if its Content-Type doesn't match. This
+    # catches a source silently switching formats (e.g. HTML -> a login
+    # page) before a parser tries to make sense of it and fails oddly.
+    expected_content_type: text/html
+
+    # Hard cap on response size the fetcher will buffer. Pick something
+    # comfortably larger than the real page but nowhere near unbounded.
+    max_bytes: 2097152   # 2 MiB
+
+  # -------------------------------------------------------------------------
+  # Normalize: how the fetched artifact is reduced to the minimum content
+  # that should trigger re-extraction when it changes. This is the single
+  # biggest lever on cost — hash too much of the page and you'll extract on
+  # every visit-scoped or timestamp-scoped attribute change; hash too little
+  # and you'll miss real updates.
+  # -------------------------------------------------------------------------
+  normalize:
+    # A CSS selector (or list) identifying the section(s) that actually
+    # contain release data. Only this is hashed for change detection.
+    section_selector: "div.release-list"
+
+    # Elements/attributes to strip before hashing or extracting — scripts,
+    # styles, and any framework-injected volatile attributes (e.g. Alpine's
+    # x-data, Livewire's wire:id) that change on every page load without the
+    # underlying content changing.
+    strip: [script, style, noscript]
+
+  # -------------------------------------------------------------------------
+  # Extract: the declarative extraction rules themselves.
+  # -------------------------------------------------------------------------
+  extract:
+    # A selector matching one element per candidate release. Everything
+    # under `fields` is resolved relative to each match.
+    release_container: "div.release-entry"
+
+    fields:
+      version:
+        selector: "span.version"
+        # Available transforms: trim, lowercase, uppercase. Chain with a list.
+        transform: trim
+        # required: true is the default; set false only if a field is
+        # genuinely optional for this source and its absence shouldn't fail
+        # extraction of the rest of the candidate.
+
+      channel:
+        selector: "span.channel-badge"
+        transform: [trim, lowercase]
+        # Map the vendor's own labels to FirmScout's constrained vocabulary.
+        # An unmapped value should fail loudly, not be guessed — add it here
+        # explicitly once you've confirmed what it means.
+        map:
+          stable: stable
+          beta: testing
+          nightly: development
+
+      release_date:
+        selector: ":scope"
+        # Regex applied to the selected element's text to pull out the date.
+        regex: "(\\d{4}-\\d{2}-\\d{2})"
+        date_format: "2006-01-02"   # Go reference-time layout
+        # Precision must match what the source actually provides. Never
+        # claim exact_day if the source only gives a month or a year — see
+        # the "no invented precision" principle in the blueprint.
+        precision: exact_day
+        # For a source that only publishes month or year, use a different
+        # regex/date_format pair and set precision to month_only or
+        # year_only accordingly. Do not fabricate a day-of-month.
+
+    # Fixed release type for everything this collector extracts, when the
+    # source is single-purpose (e.g. a firmware-only changelog page). Must
+    # be one of the constrained release_type values — never default to a
+    # generic "firmware" label out of convenience; if a source legitimately
+    # mixes release types, extract the type per-candidate as a field instead
+    # of hardcoding one here.
+    release_type: firmware
+
+    # A selector (or list) whose text becomes the evidence excerpt stored
+    # alongside the candidate. Keep this short — an excerpt sufficient to
+    # justify the extracted facts, not a full reproduction of the vendor's
+    # release notes (see the copyright note in CONTRIBUTING.md).
+    evidence_excerpt: ":scope"
+
+# =============================================================================
+# Checklist before you open the PR — see also
+# docs/collectors/developing-collectors.md#checklist-for-submitting-a-collector
+#   [ ] Chose html_selectors/text_regex over a code collector unless there's
+#       a specific, stated reason a code collector is needed.
+#   [ ] normalize.section_selector excludes volatile, release-irrelevant
+#       content.
+#   [ ] release_date.precision matches what the source actually provides.
+#   [ ] channel and release_type use the project's constrained vocabularies.
+#   [ ] At least one fixture with full provenance, trimmed to the minimum.
+#   [ ] At least one edge-case fixture (missing field, reduced precision, or
+#       a broken layout).
+#   [ ] dataset/sources/<vendor>/<source>.yaml has an honest
+#       robots_policy_status and terms_review_status.
+# =============================================================================

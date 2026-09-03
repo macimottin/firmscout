@@ -1,0 +1,120 @@
+name: New source
+description: Propose a new source (URL, feed, or API) for FirmScout to monitor.
+title: "[New source]: "
+labels: ["dataset", "new-source"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A source is a specific, monitorable location — one changelog page,
+        one API endpoint, one RSS feed — not a whole vendor. If the vendor
+        itself isn't in the catalogue yet, open a **New vendor** issue first
+        (or alongside this one).
+
+        **Compliance is evaluated before collection, not after.** Please
+        answer the questions below as accurately as you can — "I haven't
+        checked yet" is a completely fine answer and the honest default. See
+        `DATA_SOURCES.md` for the full policy, including why Dell's
+        technically ideal XML catalogue is registered but disabled because
+        its `robots.txt` disallows it.
+  - type: input
+    id: vendor
+    attributes:
+      label: Vendor
+      description: Vendor name or slug this source belongs to.
+    validations:
+      required: true
+  - type: input
+    id: source_url
+    attributes:
+      label: Official source URL
+      description: The exact URL of the page, feed, or API endpoint.
+      placeholder: "https://example-vendor.com/support/downloads"
+    validations:
+      required: true
+  - type: dropdown
+    id: source_type
+    attributes:
+      label: Source type
+      options:
+        - HTML page (structured)
+        - HTML page (unstructured / requires custom logic)
+        - JSON API
+        - XML / RSS / Atom feed
+        - PDF document(s)
+        - GitHub releases
+        - Other (describe in additional context)
+    validations:
+      required: true
+  - type: dropdown
+    id: quality_class
+    attributes:
+      label: What quality class do you believe this source is?
+      description: See `docs/collectors/source-quality-policy.md` for the definitions. If unsure, say so — a maintainer will help verify.
+      options:
+        - Official manufacturer source
+        - Authorised support portal
+        - Vendor-maintained repository
+        - Trusted community source
+        - Unknown third party
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: robots_evidence
+    attributes:
+      label: robots.txt evidence
+      description: What does the host's `robots.txt` say about the path you want to collect? Paste the relevant lines, or the URL you checked, e.g. `https://example-vendor.com/robots.txt`. If you haven't checked, say so — do not guess.
+      placeholder: |
+        Checked https://example-vendor.com/robots.txt on 2026-09-03:
+        User-agent: *
+        Disallow: /admin
+        (the /support path is not disallowed)
+    validations:
+      required: true
+  - type: textarea
+    id: terms_evidence
+    attributes:
+      label: Terms of service evidence
+      description: Anything you found in the site's terms that's relevant to automated, low-volume, polite collection of publicly available version metadata. It's fine to say "not reviewed yet" — `terms_review_status` will stay `pending` until it is.
+    validations:
+      required: true
+  - type: dropdown
+    id: auth_required
+    attributes:
+      label: Authentication required?
+      description: Does reaching this content require logging in, an API key, or otherwise authenticating?
+      options:
+        - "No — publicly accessible"
+        - "Yes — requires authentication (describe below; FirmScout does not bypass auth)"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: auth_details
+    attributes:
+      label: Authentication details (if applicable)
+      description: What's required, and — important — is there a legitimate, compliant way to access it (e.g. a free developer account with published terms) versus something that would require bypassing access controls?
+  - type: input
+    id: cadence
+    attributes:
+      label: Expected update cadence
+      description: Roughly how often does this source publish new information? Helps set an appropriate check interval.
+      placeholder: "Weekly to monthly, based on past changelog entries"
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample content (optional but helpful)
+      description: A snippet of what this source returns, if you have it — helps assess whether a config-driven collector can handle it or whether it needs custom code.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I did not bypass authentication, a CAPTCHA, or a rate limit to gather this information.
+          required: true
+        - label: I understand this source will be registered with `enabled: false` unless both `robots_policy_status` and `terms_review_status` come back clear, per `DATA_SOURCES.md`.
+          required: true

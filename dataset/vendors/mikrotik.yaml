@@ -1,0 +1,27 @@
+# =============================================================================
+# Vendor: MikroTik
+# =============================================================================
+# Registry record, synchronised into the vendors table by `firmscout registry
+# sync`. Everything here is a fact taken from the vendor's own site; nothing in
+# this file is inferred.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Vendor
+
+metadata:
+  # Public identifier. Slugs appear in URLs and API responses, so they are
+  # immutable once published.
+  slug: mikrotik
+
+spec:
+  name: MikroTik
+  # The registered company behind the MikroTik brand, based in Riga, Latvia.
+  legal_name: Mikrotikls SIA
+  homepage_url: https://mikrotik.com
+  support_url: https://mikrotik.com/support
+  country_code: LV
+  notes: >-
+    Networking hardware manufacturer. RouterOS is the embedded operating system
+    shipped on their routers and switches, published as a single version stream
+    with several release channels (long-term, stable, testing, development).

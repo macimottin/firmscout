@@ -1,0 +1,54 @@
+<!--
+  SYNTHETIC FIXTURE -- not a recording of any real response.
+
+  Purpose: a vendor page that dates a release "2026-02" and nothing more. The
+  collector must produce a month-precision PartialDate and must never invent a
+  day. It is read by the synthetic config in html_selectors_test.go
+  (collector id "synthetic.month-only"), which declares
+  precision: month_only with date_format "2006-01" -- the real
+  mikrotik.changelogs config declares exact_day, because the real page really
+  does publish full dates.
+
+  The second entry carries a full YYYY-MM-DD date that the month-only layout
+  cannot parse. It must land on the unknown date rather than being coerced: a
+  date FirmScout could not read is rendered as absent, never approximated.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Changelogs</title>
+  <style>.changelog-header { display: flex; }</style>
+  <script>window.__BUILD__ = { version: "9.99.9" };</script>
+</head>
+<body>
+
+<nav class="topbar"><a href="/download/changelogs" class="font-bold">Changelogs</a></nav>
+
+<main class="container">
+
+  <div class="flex items-center gap-4 py-3 changelog-header">
+    <i class="ti ti-chevron-down text-lg"></i>
+    <div class="grow"><div class="flex items-center justify-between"><div class="flex gap-4 items-center">
+      <span class="mtk-text-sm font-bold min-w-20"> 7.20.1 </span>
+      <div class="flex gap-1 text-[10px] font-bold text-white uppercase leading-none">
+        <div class="rounded-[4px] bg-green p-1"> Long-term </div>
+      </div>
+      <span class="mtk-text-sm text-gray-500"> 2026-02 </span>
+    </div></div></div>
+  </div>
+
+  <div class="flex items-center gap-4 py-3 changelog-header">
+    <i class="ti ti-chevron-down text-lg"></i>
+    <div class="grow"><div class="flex items-center justify-between"><div class="flex gap-4 items-center">
+      <span class="mtk-text-sm font-bold min-w-20"> 7.20.0 </span>
+      <div class="flex gap-1 text-[10px] font-bold text-white uppercase leading-none">
+        <div class="rounded-[4px] bg-green p-1"> Long-term </div>
+      </div>
+      <span class="mtk-text-sm text-gray-500"> not yet announced </span>
+    </div></div></div>
+  </div>
+
+</main>
+
+</body>
+</html>

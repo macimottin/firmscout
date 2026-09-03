@@ -1,0 +1,50 @@
+<!--
+  SYNTHETIC FIXTURE -- not a recording of any real response.
+
+  Purpose: a container whose version span is present but blank. The collector
+  must skip that candidate and say why, rather than emitting a candidate with an
+  empty version (which could not be deduplicated and would collide with every
+  other empty-version candidate from the same source).
+
+  The second entry is well formed, so the test also proves that one malformed
+  entry does not discard the entries around it.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Changelogs</title>
+  <style>.changelog-header { display: flex; }</style>
+  <script>window.__BUILD__ = { version: "9.99.9" };</script>
+</head>
+<body>
+
+<nav class="topbar"><a href="/download/changelogs" class="font-bold">Changelogs</a></nav>
+
+<main class="container">
+
+  <div class="flex items-center gap-4 py-3 changelog-header">
+    <i class="ti ti-chevron-down text-lg"></i>
+    <div class="grow"><div class="flex items-center justify-between"><div class="flex gap-4 items-center">
+      <span class="mtk-text-sm font-bold min-w-20">   </span>
+      <div class="flex gap-1 text-[10px] font-bold text-white uppercase leading-none">
+        <div class="rounded-[4px] bg-green p-1"> Long-term </div>
+      </div>
+      <span class="mtk-text-sm text-gray-500"> 2026-09-03 </span>
+    </div></div></div>
+  </div>
+
+  <div class="flex items-center gap-4 py-3 changelog-header">
+    <i class="ti ti-chevron-down text-lg"></i>
+    <div class="grow"><div class="flex items-center justify-between"><div class="flex gap-4 items-center">
+      <span class="mtk-text-sm font-bold min-w-20"> 7.21.5 </span>
+      <div class="flex gap-1 text-[10px] font-bold text-white uppercase leading-none">
+        <div class="rounded-[4px] bg-green p-1"> Long-term </div>
+      </div>
+      <span class="mtk-text-sm text-gray-500"> 2026-07-06 </span>
+    </div></div></div>
+  </div>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "firmscout-tooling",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repository tooling only. The web application lives in apps/web and has its own package.json.",
+  "scripts": {
+    "mermaid": "node scripts/mermaid-parse.mjs ."
+  },
+  "devDependencies": {
+    "jsdom": "^28.0.0",
+    "mermaid": "^11.13.0"
+  }
+}

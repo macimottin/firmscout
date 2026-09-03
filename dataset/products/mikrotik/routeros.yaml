@@ -1,0 +1,53 @@
+# =============================================================================
+# Product: MikroTik RouterOS
+# =============================================================================
+# RouterOS is the embedded operating system MikroTik ships on its routers and
+# switches. It is registered as one product with one version stream rather than
+# one product per device model, because a single RouterOS release applies across
+# the hardware range -- the per-device distinction that matters (which
+# architecture's image to download) is not a distinct release stream.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: mikrotik-routeros
+  vendor: mikrotik
+
+spec:
+  name: RouterOS
+
+  # embedded_os, not "firmware". The distinction is the whole point of the
+  # release-type vocabulary: RouterOS is a general-purpose operating system for
+  # the device, not a component firmware image like a BIOS or a BMC build, and a
+  # user searching for one does not want the other.
+  default_release_type: embedded_os
+
+  lifecycle_status: active
+
+  # Security-relevant: RouterOS runs on internet-facing edge devices, and its
+  # releases routinely carry security fixes.
+  security_critical: true
+
+  description: >-
+    Embedded operating system for MikroTik routers, switches and wireless
+    devices. Published in four channels: long-term, stable, testing and
+    development.
+
+  aliases:
+    - alias: RouterOS
+      kind: marketing_name
+      source_note: The vendor's own product name, as used on mikrotik.com.
+    - alias: Router OS
+      kind: common_misspelling
+      source_note: Frequently written with a space in third-party references.
+    - alias: ROS
+      kind: vendor_internal
+      source_note: >-
+        Widely used abbreviation. Ambiguous outside a MikroTik context (it also
+        names the Robot Operating System), so it is recorded as an alias for
+        matching within this vendor only, never as a global identifier.
+
+  category_slugs:
+    - network-operating-system

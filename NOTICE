@@ -1,0 +1,11 @@
+FirmScout
+Copyright 2026 FirmScout contributors
+
+This product includes software developed by the FirmScout project
+(https://github.com/macimottin/firmscout).
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+The FirmScout source code license does not cover the FirmScout dataset,
+the hosted service terms, or the API terms, which are licensed separately.
+See docs/architecture/licensing.md.

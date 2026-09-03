@@ -1,0 +1,62 @@
+name: New vendor
+description: Propose adding a new vendor to the catalogue.
+title: "[New vendor]: "
+labels: ["dataset", "new-vendor"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A vendor is the top-level identity in the catalogue — the manufacturer
+        or publisher, not a specific product line. If you also know which
+        products and sources you want tracked, feel free to describe them
+        here too, or open separate **New source** issues once the vendor
+        exists. See `CONTRIBUTING.md` for how vendor/product/source
+        contributions fit together.
+  - type: input
+    id: vendor_name
+    attributes:
+      label: Vendor name
+      placeholder: "Ubiquiti Inc."
+    validations:
+      required: true
+  - type: input
+    id: vendor_slug
+    attributes:
+      label: Proposed slug
+      description: Lowercase, hyphenated, stable — this becomes part of public URLs and API identifiers.
+      placeholder: "ubiquiti"
+    validations:
+      required: true
+  - type: input
+    id: primary_domain
+    attributes:
+      label: Vendor's primary official domain
+      placeholder: "ui.com"
+    validations:
+      required: true
+  - type: textarea
+    id: categories
+    attributes:
+      label: What kind of products does this vendor make?
+      description: Networking, servers, appliances, embedded devices, etc. — helps decide which existing categories apply, or whether a new one is needed.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this vendor worth tracking?
+      description: Scale of deployment, community interest, anything that helps prioritize.
+  - type: textarea
+    id: known_sources
+    attributes:
+      label: Known sources (optional)
+      description: If you already know where this vendor publishes version/release information, list them here — official downloads page, changelog, PSIRT/security feed, API, etc. You don't need to have verified compliance yet; that happens in the New source form.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I checked that this vendor isn't already in `dataset/vendors/`.
+          required: true
+        - label: I understand new sources for this vendor will go through the compliance review described in `DATA_SOURCES.md` before any automated collection happens.
+          required: true

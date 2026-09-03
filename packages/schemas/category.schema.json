@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firmscout.dev/schemas/category.schema.json",
+  "title": "FirmScout category registry entry",
+  "description": "One term in the controlled vocabulary products are classified by. Categories are declared in dataset/categories.yaml, never created on demand: a product referencing an undeclared slug fails the sync rather than minting a category from a typo.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "firmscout.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "Category"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 64
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "parent": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Slug of the parent category. Keep the tree shallow; two levels is usually enough."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    }
+  }
+}

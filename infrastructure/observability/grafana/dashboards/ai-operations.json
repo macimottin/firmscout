@@ -1,0 +1,49 @@
+{
+  "uid": "firmscout-ai-operations",
+  "title": "AI operations (stub)",
+  "description": "STUB -- see docs/architecture/grafana-dashboards.md #4 for the full specification. Not implemented.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "tags": [
+    "firmscout",
+    "ai",
+    "stub"
+  ],
+  "style": "dark",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Not yet implemented",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 6
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "# AI operations -- stub\n\nThis dashboard is a **stub**, not a working implementation. It is registered here (and provisioned by Grafana) so the file exists at the path grafana-dashboards.md's provisioning section names, but its panels have not been built.\n\nThe real specification -- audience, refresh interval, decision supported, and every panel's query -- is #4 of [docs/architecture/grafana-dashboards.md](../grafana-dashboards.md#4-ai-operations). See infrastructure/observability/grafana/dashboards/README.md for which dashboards are real and which are stubs."
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": []
+}

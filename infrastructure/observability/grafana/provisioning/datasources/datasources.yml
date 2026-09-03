@@ -1,0 +1,118 @@
+# Grafana datasource provisioning for FirmScout.
+#
+# Grafana reads this file on container start; no datasource is ever added
+# by hand through the UI (blueprint §21 / grafana-dashboards.md's
+# "Dashboard provisioning" section, which states the same rule for
+# datasources). `${VAR}` values are expanded from the Grafana container's
+# own environment (populated from infrastructure/docker/.env via that
+# service's `env_file:` in docker-compose.yml).
+#
+# Four datasources are provisioned: Prometheus, Loki, and Tempo (this
+# task's explicit brief) plus PostgreSQL, which grafana-dashboards.md's
+# per-dashboard panel tables require directly (e.g. Platform overview's
+# "Vendors"/"Products"/"Active sources" stats, Collector health's "Stalest
+# sources" table) -- those panels have no Prometheus/Loki/Tempo equivalent,
+# the data genuinely lives in Postgres (grafana-dashboards.md's
+# "Datasources referenced across these dashboards" note). On AWS, a fifth
+# CloudWatch datasource is added for infrastructure-level signals the OTel
+# Collector cannot see (docs/architecture/observability.md §2); not
+# applicable locally, so not provisioned here.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      # Correlates a `request_id`/`trace_id` field found in a log line back
+      # to its trace in Tempo -- the reverse direction of Tempo's
+      # tracesToLogsV2 below. Matches
+      # docs/architecture/observability.md §4's "a log line found by
+      # grepping for a request_id ... can be pivoted straight into the
+      # matching trace in Tempo" correlation guarantee.
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: '"trace_id"\s*:\s*"([a-f0-9]+)"'
+          name: TraceID
+          url: "$${__value.raw}"
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      httpMethod: GET
+      # Trace -> logs correlation: from an open trace/span in Tempo, jump
+      # straight to the matching log lines in Loki, scoped by
+      # service_name (a Loki stream label -- see
+      # infrastructure/observability/loki/loki-config.yaml's otlp_config)
+      # and a time window padded 5m either side of the span.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        filterByTraceID: true
+        filterBySpanID: false
+        tags:
+          - key: service.name
+            value: service_name
+      # Trace -> metrics correlation: from a span, jump to the
+      # firmscout_api_requests_total rate for that span's service/route
+      # around the same time window, per
+      # docs/architecture/observability.md §5's API metrics group.
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        tags:
+          - key: service.name
+            value: service
+        queries:
+          - name: "Request rate for this service"
+            query: "sum(rate(firmscout_api_requests_total{service=\"$${__tags}\"}[5m]))"
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+
+  - name: PostgreSQL
+    type: postgres
+    uid: postgresql
+    access: proxy
+    url: postgres:5432
+    database: ${POSTGRES_DB}
+    user: ${POSTGRES_USER}
+    editable: false
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1700
+      timescaledb: false
+      # NOTE: this reuses the same application role as api/worker/migrate
+      # for local development simplicity. grafana-dashboards.md describes
+      # the intended production posture as "a read-only role, scoped to the
+      # analytics rollup tables and the specific registry tables" the
+      # dashboards read -- that scoped role is a database/migrations
+      # concern (creating the role and its GRANTs) out of scope for this
+      # infrastructure/ change; not yet created.

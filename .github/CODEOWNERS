@@ -1,0 +1,45 @@
+# CODEOWNERS
+#
+# Order matters: later, more specific patterns override earlier, broader
+# ones. @macimottin is the default owner for anything not matched below.
+# As collector maintainers and area maintainers join the project (see
+# GOVERNANCE.md), add them here rather than routing everything through one
+# person.
+
+# Default owner for anything not matched by a more specific rule below.
+*                                   @macimottin
+
+# --- Documentation -----------------------------------------------------
+/README.md                         @macimottin
+/CONTRIBUTING.md                   @macimottin
+/CODE_OF_CONDUCT.md                @macimottin
+/GOVERNANCE.md                     @macimottin
+/SECURITY.md                       @macimottin
+/DATA_SOURCES.md                   @macimottin
+/docs/                             @macimottin
+
+# --- Database and data model -------------------------------------------
+/database/                         @macimottin
+/internal/adapters/postgres/       @macimottin
+/docs/data-model/                  @macimottin
+
+# --- Collectors: SDK, engines, and vendor configs -----------------------
+/collectors/                       @macimottin
+/internal/adapters/collectors/     @macimottin
+/docs/collectors/                  @macimottin
+
+# --- Dataset registry (vendors, products, sources) -----------------------
+# Curated, reviewable data — see ADR-0016 (hybrid dataset) and
+# DATA_SOURCES.md. Per-vendor ownership should be added here as collector
+# maintainers take on specific vendors, e.g.:
+#   /dataset/vendors/mikrotik.yaml         @some-collector-maintainer
+#   /dataset/sources/mikrotik/             @some-collector-maintainer
+/dataset/                          @macimottin
+
+# --- Infrastructure -------------------------------------------------------
+/infrastructure/                   @macimottin
+/.github/workflows/                @macimottin
+
+# --- AI agent contracts (schemas and prompt registry; no runtime code yet) -
+/agents/                           @macimottin
+/packages/schemas/                 @macimottin

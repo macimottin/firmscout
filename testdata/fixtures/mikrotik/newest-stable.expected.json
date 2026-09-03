@@ -1,0 +1,21 @@
+{
+  "collectorId": "mikrotik.newest-stable",
+  "note": "Recorded body of https://upgrade.mikrotik.com/routeros/NEWESTa7.stable, retrieved 2026-09-03: the literal bytes '7.24.2 1788429434'. The epoch is NOT published as a release date -- MikroTik does not document what it means, so the candidate carries unknown date precision and the raw value survives only as evidence. See the note in collectors/config/mikrotik/newest-stable.yaml.",
+  "candidates": [
+    {
+      "rawVersion": "7.24.2",
+      "normalizedVersion": "7.24.2",
+      "releaseDate": {
+        "precision": "unknown",
+        "value": ""
+      },
+      "releaseType": "embedded_os",
+      "channel": "stable",
+      "applicability": {
+        "productHint": "mikrotik-routeros"
+      },
+      "evidenceExcerptContains": "7.24.2 1788429434",
+      "confidenceAtLeast": 0.9
+    }
+  ]
+}

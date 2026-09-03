@@ -1,0 +1,72 @@
+name: Schema Validation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'dataset/**'
+      - 'collectors/config/**'
+      - 'packages/schemas/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'dataset/**'
+      - 'collectors/config/**'
+      - 'packages/schemas/**'
+
+jobs:
+  schemas:
+    runs-on: ubuntu-latest
+    name: Schema Validation
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Guard: check if schema files exist
+      - name: Check for schema files
+        id: check-schemas
+        run: |
+          if [ -d packages/schemas ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "packages/schemas not found, skipping schema validation"
+          fi
+
+      - name: Set up Python
+        if: steps.check-schemas.outputs.found == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Install check-jsonschema
+        if: steps.check-schemas.outputs.found == 'true'
+        run: pip install check-jsonschema
+
+      - name: Validate dataset vendors
+        if: steps.check-schemas.outputs.found == 'true'
+        run: |
+          check-jsonschema \
+            --schemafile packages/schemas/vendor.schema.json \
+            'dataset/vendors/*.yaml'
+
+      - name: Validate dataset products
+        if: steps.check-schemas.outputs.found == 'true'
+        run: |
+          check-jsonschema \
+            --schemafile packages/schemas/product.schema.json \
+            'dataset/products/**/*.yaml'
+
+      - name: Validate dataset sources
+        if: steps.check-schemas.outputs.found == 'true'
+        run: |
+          check-jsonschema \
+            --schemafile packages/schemas/source.schema.json \
+            'dataset/sources/**/*.yaml'
+
+      - name: Validate collector config
+        if: steps.check-schemas.outputs.found == 'true'
+        run: |
+          check-jsonschema \
+            --schemafile packages/schemas/collector-config.schema.json \
+            'collectors/config/**/*.yaml'
