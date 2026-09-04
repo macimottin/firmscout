@@ -20,6 +20,10 @@ info:
 externalDocs:
   description: Full API design document
   url: ../architecture/api.md
+# The /api/v1 prefix repeats what the `api.` hostname already says. That is deliberate,
+# not an oversight: keeping it means the route is byte-for-byte identical in every
+# environment, so no layer strips or adds a prefix depending on where it is deployed.
+# Before "tidying" this to api.firmscout.dev/v1, read docs/adr/0019-public-domain-shape.md.
 servers:
   - url: https://api.firmscout.dev/api/v1
     description: Production

@@ -171,6 +171,11 @@ because the code exists:
 6. **Whether the epoch in MikroTik's pointer file may ever be published as a date.** The
    collector currently publishes no date from it, on the grounds that the vendor does
    not document what it means.
+7. **Registering `firmscout.dev` and `api.firmscout.dev`.** [ADR-0019](../adr/0019-public-domain-shape.md)
+   settles the *shape* of the public URLs — the API is served from `api.firmscout.dev`
+   with the `/api/v1` prefix retained — but the domain itself is not registered and no
+   DNS zone exists. The decision was recorded because an API base URL is an identifier
+   consumers hardcode; acting on it requires buying the name.
 
 ## 9. Known limitations
 

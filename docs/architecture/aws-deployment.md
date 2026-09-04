@@ -12,9 +12,9 @@ This matters beyond convenience: it means the AWS deployment is never a separate
 
 | Component | Role |
 | --- | --- |
-| **Route 53** | DNS for the public domain(s); health-check-based failover is available but not required at MVP scale |
-| **ACM** | TLS certificates for CloudFront and API Gateway custom domains, auto-renewed |
-| **CloudFront** | The single public entry point: terminates TLS, caches static assets and cacheable API responses, routes to API Gateway or the web Lambda by path |
+| **Route 53** | DNS for `firmscout.dev`, `www.firmscout.dev` and `api.firmscout.dev`, all three aliases on the same CloudFront distribution ([ADR-0019](../adr/0019-public-domain-shape.md)); health-check-based failover is available but not required at MVP scale |
+| **ACM** | One certificate covering `firmscout.dev`, `www.firmscout.dev` and `api.firmscout.dev`, auto-renewed. One certificate rather than one per name, so there is a single thing to keep valid |
+| **CloudFront** | The single public entry point for all three hostnames: terminates TLS, caches static assets and cacheable public API responses, and routes to API Gateway or the web Lambda by path. Behaviours match on path, not host, so `/api/v1/*` reaches the API origin from either name; `api.firmscout.dev` is the documented and advertised base URL ([ADR-0019](../adr/0019-public-domain-shape.md)). Responses to authenticated requests are not cached at the edge at all, per threat T-13 in [security.md](security.md) |
 | **WAF** | Attached to CloudFront: managed rule groups plus FirmScout-specific rate rules, the first layer of the layered rate-limiting design (blueprint §3.9) |
 | **Shield Standard** | Baseline DDoS protection, included at no extra configuration for anything sitting behind CloudFront |
 | **S3 (static assets)** | OpenNext's build output for `apps/web` — JS/CSS/image assets served directly by CloudFront, never touching Lambda |

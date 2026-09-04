@@ -37,6 +37,7 @@ a decision with no downside has not been examined.
 | [0016](0016-hybrid-dataset.md) | Hybrid dataset — registry in Git, observed facts in PostgreSQL | Accepted | Curation gets code review; observation gets a query planner | no |
 | [0017](0017-version-strings-and-date-precision.md) | Opaque version strings, derived "latest," and explicit date precision | Accepted | Real vendor versions are not semver, and a day is never invented | no |
 | [0018](0018-source-compliance-policy.md) | Source compliance is a first-class field, evaluated before collection | Accepted | Robots and terms status gate dispatch; Dell is registered but disabled | **yes** |
+| [0019](0019-public-domain-shape.md) | The API is served from `api.firmscout.dev`, keeping the `/api/v1` path prefix | Accepted | A base URL consumers hardcode has to be able to move; apex cookies must not ride on API requests | no |
 
 ## Decisions requiring qualified legal review
 

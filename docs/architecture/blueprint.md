@@ -265,6 +265,7 @@ The design rule: **the free tier is limited by convenience, not by truth.** Noth
 | 16 | Hybrid dataset: registry in Git, facts in PostgreSQL | Reviewable curation, queryable observation | [0016](../adr/0016-hybrid-dataset.md) |
 | 17 | Opaque version strings, explicit date precision | Real vendor data is not semver and not always day-precise | [0017](../adr/0017-version-strings-and-date-precision.md) |
 | 18 | Compliance status is a first-class source field | Robots and terms are evaluated before collection, not after | [0018](../adr/0018-source-compliance-policy.md) |
+| 19 | API on `api.firmscout.dev`, `/api/v1` prefix retained | A base URL consumers hardcode must be able to move; apex cookies must not ride on API requests | [0019](../adr/0019-public-domain-shape.md) |
 
 ---
 
@@ -1095,7 +1096,7 @@ Full definition: [definition-of-done.md](definition-of-done.md). Per level — c
 
 ## 45. ADR list
 
-Index: [`docs/adr/README.md`](../adr/README.md). Eighteen ADRs, 0001 through 0018, listed with their decisions in §6. Two require qualified legal review: [0009](../adr/0009-code-and-data-licensing.md) and [0018](../adr/0018-source-compliance-policy.md).
+Index: [`docs/adr/README.md`](../adr/README.md). Nineteen ADRs, 0001 through 0019, listed with their decisions in §6. Two require qualified legal review: [0009](../adr/0009-code-and-data-licensing.md) and [0018](../adr/0018-source-compliance-policy.md).
 
 ---
 

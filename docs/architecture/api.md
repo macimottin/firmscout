@@ -2,6 +2,23 @@
 
 > Expands [blueprint §12](blueprint.md#12-api-design). The machine-readable contract is [`docs/api/openapi.yaml`](../api/openapi.yaml); this document is the human-readable design behind it and the source of truth when the two could be read as disagreeing (§"OpenAPI as the machine-readable contract" resolves that case). Commercial mechanics — plans, key lifecycle, billing events — are out of scope here; see `api-commercial.md`.
 
+## Base URL
+
+| Environment | Base URL |
+| --- | --- |
+| Production | `https://api.firmscout.dev/api/v1` |
+| Local development | `http://localhost:8080/api/v1` |
+
+The `/api/v1` prefix is retained on the production host even though `api.` already says
+"API". That redundancy is deliberate: the route is then byte-for-byte identical in every
+environment, and no layer strips or adds a prefix depending on where it is deployed.
+Environment-dependent path rewriting is a reliable source of bugs that appear only in
+production.
+
+The reasoning behind the hostname — including why a path on the apex domain was
+rejected, and the cookie-isolation argument that decided it — is in
+[ADR-0019](../adr/0019-public-domain-shape.md).
+
 ## 1. Design principles
 
 - **Versioned path prefix.** Every endpoint lives under `/api/v1`. A breaking change ships as `/api/v2` alongside the still-running `v1`, never as a silent behaviour change under the same prefix (§9).
