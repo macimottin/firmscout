@@ -29,7 +29,7 @@ Registering a new vendor is done when:
 
 - `dataset/vendors/<slug>.yaml` exists and validates against its JSON Schema.
 - Every source proposed for that vendor has a filled-in `robots_policy_status` (mechanically verified, not assumed — DATA_SOURCES.md) and `terms_review_status` (a stated, honest value, even if `pending`) **before** any collector is written for it, not after — the ordering matters, per risks.md R10's narrative on why Dell is the standing counterexample to writing the collector first.
-- A source's `enabled` flag is `true` only if `robots_policy_status = allowed` **and** `terms_review_status = reviewed_ok`; anything short of that is registered, documented, and left `enabled = false`.
+- A source is collected from only if `enabled` is `true` **and** `robots_policy_status` is one of `allowed` or `not_applicable` **and** `terms_review_status` is one of `approved` or `restricted` (and its health is `active` or `degraded`). Anything short of that is registered, documented, and left `enabled = false`. The rule is `domain.Source.CompliancePermitsCollection` in [`internal/domain/source.go`](../../internal/domain/source.go); ADR-0018 is the decision behind it.
 - At least one source has a quality class assigned per DATA_SOURCES.md's table, with the reasoning for that class (not just the label) visible somewhere reviewable — the pull request description, a comment in the YAML, or a linked issue.
 - `firmscout registry sync` runs cleanly against the new vendor's files with no schema or cross-reference errors.
 

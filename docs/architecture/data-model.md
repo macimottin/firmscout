@@ -14,7 +14,7 @@ to remember. Where a rule could be expressed in SQL, it is.
 
 | Kind | Tables | Written by | Volume | Retention |
 | --- | --- | --- | --- | --- |
-| **Registry** | `vendors`, `categories`, `product_families`, `products`, `product_categories`, `product_aliases`, `sources`, `source_products`, `collector_definitions` | `firmscout registry sync` from Git | Low, human-scale | Permanent |
+| **Registry** | `vendors`, `categories`, `product_families`, `products`, `product_categories`, `product_aliases`, `product_relationships`, `sources`, `source_products`, `collector_definitions` | `firmscout registry sync` from Git | Low, human-scale | Permanent |
 | **Observation** | `source_checks`, `source_artifacts`, `collector_runs`, `candidate_releases`, `validation_results` | Workers | High, machine-scale | Bounded by policy |
 | **Fact** | `releases`, `release_product_mappings`, `release_notes`, `evidence` | `PublishRelease` use case only | Moderate, append-only | Permanent |
 | **Platform** | `jobs`, `api_consumers`, `api_keys`, `usage_records`, `usage_aggregates`, `analytics_events`, `audit_events`, `ai_runs`, `review_items`, `product_summaries` | Various | Mixed | Mixed |
@@ -116,6 +116,16 @@ and superseded for ten.
 to one exact model, several models, a whole family, one hardware revision, or one region,
 without duplicating the fact once per product.
 
+No release row targets a family today, and that is a deliberate restriction rather than an
+unfinished feature. A family in this catalogue groups devices offered the same base firmware
+*image file* — MikroTik's published architecture decides which `routeros-<version>-<arch>.npk`
+a device takes — and it does not group them by version: every architecture measured is offered
+the same current release. A family-targeted mapping would assert that a specific release
+applies to every member, and the "which version" half of that claim is exactly what
+measurement declined to support. `release_mappings_family_latest_idx` (migration `00005`)
+constrains the first such row anyone writes; `00001`'s equivalent index is partial on
+`product_id IS NOT NULL` and never covered family-targeted rows at all. See ADR-0024.
+
 ### 5. Evidence is mandatory and self-describing
 
 `releases.evidence_id` is `NOT NULL`. Evidence carries `source_url`, `retrieved_at`,
@@ -161,6 +171,31 @@ classification. This is the schema-level answer to "do not label every release a
 
 A lookup table rather than a PostgreSQL `ENUM` because adding a type should be registry data,
 not a migration, and because `ENUM` values cannot be removed once added.
+
+### 8. A hardware model is a product, and what it runs is an edge
+
+A fleet's inventory is a list of model numbers, so the catalogue has to be reachable by model
+number. It is, without a device table: a device is a `products` row whose `model_identifier`
+carries the vendor's published product code, which means it inherits `product_aliases`,
+`product_categories`, `product_summaries` and the full-text search path with no parallel
+implementation of any of them. No column marks a row as a device — `model_identifier` being
+set is the whole test (`domain.Product.IsHardwareModel`), and it is deliberately not exclusive
+with having a release stream, because a rack server is a device *and* publishes its own BIOS
+versions.
+
+`product_relationships` is the one genuinely new thing: a directed edge from a device to the
+operating system whose releases the operator is actually looking for. Its vocabulary has
+exactly one member, `runs_os`, because that is the only product-to-product edge with measured
+evidence behind it; the `CHECK` is written `IN ('runs_os')` so widening it is one word. The two
+foreign keys differ on purpose — `from_product_id` CASCADEs so deleting a device takes its
+edges with it, `to_product_id` RESTRICTs so an operating system that devices point at cannot
+be deleted out from under them. It carries no `evidence_id`: registry-authored facts are
+provenanced by Git and `registry_path` (ADR-0016), and evidence rows are collector artefacts
+with a content hash and a collector version that a human's pull request does not have.
+
+The edge is a navigation claim — "the firmware for this box is published over there" — and
+explicitly not an applicability claim. A device holds zero `release_product_mappings` rows, so
+it has no latest release of its own and `/products/{slug}/latest` answers 404. See ADR-0024.
 
 ## Table-by-table notes
 
@@ -213,13 +248,28 @@ values, so an invalid state cannot be written even by a buggy adapter.
 ### `product_summaries`
 
 The denormalised projection the public site and search read. One row per product, refreshed
-by `PublishRelease`. It carries a `GENERATED ALWAYS AS ... STORED` `tsvector` combining
-product name (weight A), vendor name and aliases (B), and family name (C), indexed with GIN,
-plus a `pg_trgm` index on the product name for typo tolerance.
+by `PublishRelease` and by `SyncRegistry`. It carries a `GENERATED ALWAYS AS ... STORED`
+`tsvector` combining product name (weight A), vendor name and aliases (B), and family name
+(C), indexed with GIN, plus a `pg_trgm` index on the product name for typo tolerance.
 
 This is where the cost-per-search target is met: a product page and a search result are one
 indexed read, not a six-way join. The trade-off is a real staleness risk, which is why the
 refresh belongs inside the publication transaction rather than in a background job.
+
+`SyncRegistry` is the second writer because a product that never reaches the publish path has
+no row here at all, and a missing row is not a stale value — it is a 404 on the public API and
+absence from search. Every hardware model is in exactly that position, having no releases of
+its own, so a sync that upserted products without refreshing them would produce a catalogue
+nobody could read.
+
+`model_identifier` and `runs` (migration `00005`) are display columns. `runs` mirrors
+`official_sources`: a JSONB array of `{slug, name, kind}` built by a `LATERAL`, so a device
+page stays one indexed read. `model_identifier` is deliberately *not* part of the generated
+search vector — a device is found by its model number through a `model_number` alias, which is
+already flattened into `aliases_text` at weight B, and regenerating a `GENERATED ALWAYS` column
+to index a string the aliases already index would buy a duplicate. The order matters when both
+writers run: a summary rebuilt before a product's relationships are written records `runs` as
+empty, which is why `SyncRegistry` refreshes summaries in its final pass.
 
 ### `jobs`
 
@@ -324,6 +374,9 @@ Each of these is a single indexed query, which is the test of whether the model 
 | Which source supports this fact? | `releases.evidence_id` → `evidence.source_url`, `retrieved_at`, `content_hash`, `excerpt` |
 | Was this release withdrawn? | `releases.withdrawn`, with `withdrawn_at` and `withdrawn_reason` |
 | Which products share this release? | `release_product_mappings` by `release_id` |
+| I have a model number stamped on a chassis — what is it? | `product_summaries.search_vector` via the `model_number` alias flattened into `aliases_text` — the same single indexed read every other search uses |
+| What operating system does this device run? | `product_summaries.runs`, precomputed — no join at read time |
+| Which release applies to this exact model? | **Not answerable, and stated as such.** A device holds no `release_product_mappings` rows, so the API returns `firmwareApplicability.basis = runs_os_unverified` and a 404 from `/latest` rather than substituting the operating system's newest release. The sibling member `ownReleases {mapped, releaseCount}` answers the *other* question — whether the releases in the response are this product's own — because a product may be a device **and** its own release stream at once, and one scalar had room for only the winner of that test (ADR-0024, 2026-09-06 amendment) |
 | Which sources are due for a check? | `sources_dispatchable_idx` ordered by `next_check_at` |
 | What is this consumer's usage this month? | `usage_aggregates` by consumer and period |
 
@@ -345,7 +398,8 @@ Each of these is a single indexed query, which is the test of whether the model 
 - [ADR-0003](../adr/0003-postgresql.md), [ADR-0004](../adr/0004-sqlc.md),
   [ADR-0016](../adr/0016-hybrid-dataset.md),
   [ADR-0017](../adr/0017-version-strings-and-date-precision.md),
-  [ADR-0018](../adr/0018-source-compliance-policy.md)
+  [ADR-0018](../adr/0018-source-compliance-policy.md),
+  [ADR-0024](../adr/0024-device-first-catalogue.md)
 - [`docs/diagrams/data-model.md`](../diagrams/data-model.md) — entity relationships
 - [update-pipeline.md](update-pipeline.md) — how rows move through the pipeline
 - [cost-controls.md](cost-controls.md) — retention classes and partitioning triggers

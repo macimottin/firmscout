@@ -45,12 +45,16 @@ flowchart TD
   H -->|resolved| I["Compute confidence (source trust, gate results)"]
 
   I --> J{"Confidence at or above the auto-publish threshold?"}
-  J -->|"yes, official source"| K["Auto-publish candidate"]
-  J -->|"no, or community source"| L["Validation Agent escalation (advisory only)"]
+  J -->|"yes, official source"| J10{"Gate 10: does an eligible source at or above<br/>this source's authority tier report a different version?"}
+  J -->|"no, or community source"| L["Validation Agent escalation (advisory only) -- NOT BUILT;<br/>the candidate routes straight to human review"]
+  J10 -->|"no -- or the disagreement is outranked,<br/>and is named in the gate detail"| K["Auto-publish candidate"]
+  J10 -->|"yes -- never auto-resolved (ADR-0020)"| CFL["Open or refresh a source_conflicts row,<br/>set product_summaries.has_source_conflict,<br/>attach at most ONE open review item"]
+  CFL --> M
   L --> M{"Human review"}
-  M -->|approve| K
-  M -->|reject| Nrej["Reject candidate -- evidence retained"]
-  K --> O["PublishRelease: insert Release and Evidence, refresh product_summaries"]
+  M -->|"accept (DecideReviewItem)"| K
+  M -->|"reject (DecideReviewItem)"| Nrej["Reject candidate -- evidence retained"]
+  K --> O["PublishRelease: insert Release and Evidence,<br/>refresh product_summaries.<br/>An advisory is stored but never marked latest."]
+  M --> AUD["audit_events row: asserted actor,<br/>actor_authenticated = false, reason (ADR-0021)"]
 
   E2 --> P["Feed outcome into the source health state machine"]
   E3 --> P
@@ -64,33 +68,51 @@ flowchart TD
 
 ## What this shows
 
-The full per-check path in the order the objective specifies: due-check gate, cheapest-signal selection among ten concrete signal types (matching `T1` in §2 — most vendor sources expose at least one cheap signal), the nine possible check outcomes from `CheckSource`, and — only on `changed` — extraction, duplicate detection, product matching, confidence computation, optional AI escalation, human review, and finally publish or reject. Every terminal box on the left (`E2`–`E8`) feeds the source health state machine rather than the release pipeline, keeping the two state machines (`release-state-machine.md`, `source-health-state-machine.md`) cleanly separated: a source can be unhealthy without any candidate ever being created, and a candidate can be rejected without the source being unhealthy.
+The full per-check path in the order the objective specifies: due-check gate, cheapest-signal selection among ten concrete signal types (matching `T1` in §2 — most vendor sources expose at least one cheap signal), the nine possible check outcomes from `CheckSource`, and — only on `changed` — extraction, duplicate detection, product matching, confidence computation, the multi-source agreement gate, human review, and finally publish or reject.
+
+Two branches deserve reading twice. **Gate 10 sits after the confidence gate, not before it**, so a candidate that would have auto-published is the only kind that can be stopped by a disagreement — a low-confidence candidate is already going to a human, and asking about conflicts first would only change the label on the item. **The human decision is now a real edge, not a placeholder:** `DecideReviewItem` publishes or rejects inside one unit of work, resolves any conflict the item covers, and writes the audit row, or none of it happens. Every terminal box on the left (`E2`–`E8`) feeds the source health state machine rather than the release pipeline, keeping the two state machines (`release-state-machine.md`, `source-health-state-machine.md`) cleanly separated: a source can be unhealthy without any candidate ever being created, and a candidate can be rejected without the source being unhealthy.
 
 ## Assumptions
 
 - The "cheapest available signal" selection (`B1`) is a per-source, not per-check, configuration outcome in the MVP — a source is configured with the best signal it supports, and this branch represents that configuration choice rather than a live decision on every check; §16 and the collector SDK (§13) describe the fetch contract this implements.
 - "Duplicate" resolves by updating `last_verified_at` on the existing release rather than creating a new row, consistent with releases being append-only (§11, rule 2) — a re-observation is not a new fact.
-- The 0.85 default confidence threshold for auto-publication from official sources, and the rule that community sources always route to review, come directly from §16 gate 8.
+- The 0.85 default confidence threshold for auto-publication from official sources, and the rule that community sources always route to review, come directly from §16 gate 8. A collector config can hold a whole source below it on purpose: `fortinet.psirt-advisories` scores 0.55 with a floor of 0.55, because the feed states that an advisory was published and nothing about which products it affects (ADR-0018, and §7.4 of the collector-config spec).
+- Gate 10 asks about *eligible* sources only — enabled, healthy, robots-allowed, terms-reviewed. An observation from a source FirmScout may not collect from is not evidence, so it neither raises a conflict nor loses one.
+- The AI escalation box is drawn because the design calls for it. It is not implemented: a candidate that would escalate goes to human review directly.
 
 ## Failure modes
 
 - `suspicious_content` and `manual_review_required` outcomes bypass extraction entirely and go straight to human review (`M`) — this is deliberate: some signals (e.g. a WAF challenge page swapped in for real content) should never reach a collector.
 - A collector that returns candidates for a source whose compliance status forbids collection is rejected at gate 3 in §16, not shown as a separate branch here — it is folded into the deterministic gates inside `I`/`J`.
 - Repeated `parser_failed` outcomes accumulate toward the repair threshold described in `source-repair-flow.md`; this diagram shows one check in isolation, not the accumulation logic.
+- A conflict is a fact about a product and channel, not about one candidate, so it outlives the candidate that revealed it. Re-checking the same unchanged disagreement therefore reuses the open review item rather than creating another — without that rule the queue would grow by one item per check forever.
+- The `ConflictRepository` is optional in `IngestDeps`, which means a deployment that forgets to wire it turns gate 10 into a gate that can only pass. It does not error and nothing in the pipeline notices; `internal/platform/wire_test.go` is the only thing that catches it.
 
 ## Related ADRs
 
 - [ADR-0005 — Deterministic collectors](../adr/0005-deterministic-collectors.md)
 - [ADR-0006 — AI as escalation](../adr/0006-ai-as-escalation.md)
 - [ADR-0017 — Version strings and date precision](../adr/0017-version-strings-and-date-precision.md)
+- [ADR-0018 — Source compliance policy](../adr/0018-source-compliance-policy.md)
+- [ADR-0020 — Multi-source conflict is a recorded finding](../adr/0020-multi-source-conflict-detection.md)
+- [ADR-0021 — Review decisions record an asserted, unauthenticated actor](../adr/0021-asserted-reviewer-identity.md)
 
 ## Implementing code
 
-**Partially implemented.**
+**Implemented, except the AI escalation branch.**
 
-- `internal/application/checksource.go` — the whole deterministic path
+- `internal/application/checksource.go` — the whole deterministic path from the due-check gate to the nine outcomes
 - `internal/adapters/fetch/fetcher.go` — signal selection and outcome classification
 - `internal/domain/source.go` — the nine outcomes and the health mapping
+- `internal/domain/validation.go` — the ten gates in their fixed order, gate 10 included
+- `internal/application/ingest.go` — `ExtractCandidates`, `ValidateCandidate` (including `reconcileConflict`) and `PublishRelease`
+- `internal/application/review.go` — the human accept/reject edge
+- `internal/adapters/postgres/conflict_repo.go`, `audit_repo.go` — the rows the two new branches write
+
+Tests: `internal/application/pipeline_test.go`, `internal/domain/validation_test.go`, and
+`internal/integration/slice_test.go`, which runs the `changed` branch end to end against a
+real database — once to publication, once to a conflict and a human decision, and once
+through the `rss_atom` engine to an advisory that is deliberately refused publication.
 
 AI escalation is not implemented; a candidate that would escalate goes to human review instead.
 

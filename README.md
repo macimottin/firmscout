@@ -113,8 +113,13 @@ What is real today:
 - The full pipeline — registry sync, scheduled check, change detection, extraction,
   validation, publication — running against recorded fixtures with a real database.
 - A public HTTP API returning correct date precision, and a Next.js site that renders it.
-- 296 tests, a mechanically enforced Clean Architecture dependency rule, and a
-  29-table schema whose constraints encode the product's promises.
+- Hardware models catalogued by their vendor-published product code, so a fleet's
+  inventory of model numbers is what you search by: pasting `CRS328-24P-4S+RM` reaches
+  the switch, and the switch names the operating system whose releases you want. What it
+  deliberately does *not* claim is which release fits that exact model — see
+  [ADR-0024](docs/adr/0024-device-first-catalogue.md).
+- 496 test functions, a mechanically enforced Clean Architecture dependency rule, and a
+  33-table schema whose constraints encode the product's promises.
 
 What is designed but not built: the AI agents, CVE correlation, lifecycle tracking,
 billing, and the entire AWS deployment.
@@ -167,7 +172,8 @@ internal/
   platform/    configuration and dependency wiring — the composition root
   archtest/    the dependency rule, as a test that fails the build
 collectors/    the collector SDK and the YAML configurations
-dataset/       the Git-managed registry: vendors, categories, products, sources
+dataset/       the Git-managed registry: vendors, categories, families, products
+               (software and hardware models), sources
 database/      SQL migrations and queries
 docs/          blueprint, architecture, ADRs, diagrams
 infrastructure/ Docker Compose, observability configuration, Terraform skeleton

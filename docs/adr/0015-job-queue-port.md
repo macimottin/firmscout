@@ -4,7 +4,7 @@
 - **Date:** 2026-09-03
 - **Deciders:** founding team
 - **Requires qualified legal review:** no
-- **Related:** ADR-0002, ADR-0003, ADR-0010, ADR-0013
+- **Related:** ADR-0002, ADR-0003, ADR-0010, ADR-0013, ADR-0023 (what the `SKIP LOCKED` dequeue chosen here does and does not guarantee)
 
 ## Context
 
