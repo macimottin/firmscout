@@ -37,11 +37,15 @@ type Container struct {
 	Candidates application.CandidateRepository
 	Releases   application.ReleaseRepository
 	Evidence   application.EvidenceRepository
-	Reviews    application.ReviewRepository
-	Conflicts  application.ConflictRepository
-	Audit      application.AuditRepository
-	Summaries  application.SummaryRepository
-	Queue      application.JobQueue
+	// Snapshots reads and writes the catalogue's observed facts as a portable file.
+	// It is its own port because it is the only reader of the catalogue whole; see
+	// application.SnapshotRepository.
+	Snapshots application.SnapshotRepository
+	Reviews   application.ReviewRepository
+	Conflicts application.ConflictRepository
+	Audit     application.AuditRepository
+	Summaries application.SummaryRepository
+	Queue     application.JobQueue
 
 	Artifacts  application.ArtifactStore
 	Fetcher    application.Fetcher
@@ -101,6 +105,7 @@ func Build(ctx context.Context, cfg Config) (*Container, error) {
 		Sources:    postgres.NewSourceRepo(db),
 		Candidates: postgres.NewCandidateRepo(db),
 		Releases:   postgres.NewReleaseRepo(db),
+		Snapshots:  postgres.NewSnapshotRepo(db),
 		Evidence:   postgres.NewEvidenceRepo(db),
 		Reviews:    postgres.NewReviewRepo(db),
 		Conflicts:  postgres.NewConflictRepo(db),

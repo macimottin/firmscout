@@ -57,6 +57,11 @@ RUN test -n "$BINARY" || (echo "error: --build-arg BINARY is required (api|worke
 # -ldflags="-s -w" strips symbol tables/debug info to shrink the binary;
 # -X main.version=$VERSION embeds the build version so `firmscout --version`
 # (or an equivalent) can report it without a separate build-info mechanism.
+# An empty directory the final stage copies in as the artifact store's root. Making
+# it here is what lets the distroless stage own a writable path at all: it has no
+# shell, so `RUN mkdir` is impossible there.
+RUN mkdir -p /out/artifacts
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
@@ -82,6 +87,41 @@ FROM gcr.io/distroless/static-debian12:nonroot
 # to anyway beyond the ones baked into the image).
 
 COPY --from=builder /out/firmscout /firmscout
+
+# The registry travels with the binary.
+#
+# platform.Build loads the vendor/product/source registry and the collector
+# configurations from disk while assembling the container, for every binary and
+# every subcommand -- `migrate up` included, which is how the first real run of
+# this stack failed: "stat collectors/config: no such file or directory". The
+# distroless image has nothing but the binary unless these are copied in.
+#
+# The paths are the defaults FIRMSCOUT_REGISTRY_DIR and FIRMSCOUT_COLLECTOR_DIR
+# carry ("dataset" and "collectors/config", both relative), and WORKDIR below is
+# what makes those relative paths resolve. They are baked in rather than mounted
+# so an image is a complete, reproducible artifact: a container that reads its
+# catalogue definition from the host would behave differently on two machines
+# with the same image tag.
+COPY --from=builder /src/dataset /dataset
+COPY --from=builder /src/collectors/config /collectors/config
+
+# A writable home for content-addressed artifacts.
+#
+# FIRMSCOUT_ARTIFACT_DIR defaults to the relative path ".artifacts", which under
+# WORKDIR / means /.artifacts -- and this image runs as nonroot (uid 65532), which
+# cannot write to /. The first real run of this stack failed exactly there:
+# "mkdir .artifacts: permission denied". The directory is created here, owned by
+# the running user, and pointed at explicitly rather than left to a relative
+# default whose meaning depends on the working directory.
+#
+# It is deliberately a real path rather than a volume in the image: docker-compose
+# mounts a named volume over it for api and worker so fetched artifacts survive a
+# restart, while one-shot cli runs get an empty writable directory and need
+# nothing mounted.
+COPY --from=builder --chown=65532:65532 /out/artifacts /var/lib/firmscout/artifacts
+ENV FIRMSCOUT_ARTIFACT_DIR=/var/lib/firmscout/artifacts
+
+WORKDIR /
 
 # NOTE on HEALTHCHECK: gcr.io/distroless/static-debian12 has no shell (no
 # /bin/sh) and no HTTP client (no curl, no wget). A Dockerfile `HEALTHCHECK`

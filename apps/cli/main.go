@@ -7,18 +7,23 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
+	"github.com/macimottin/firmscout/internal/adapters/postgres"
 	"github.com/macimottin/firmscout/internal/application"
 	"github.com/macimottin/firmscout/internal/domain"
 	"github.com/macimottin/firmscout/internal/platform"
@@ -37,6 +42,8 @@ Commands:
   migrate status        Show applied and pending migrations
   registry sync         Load dataset/ and collectors/config/ into the database
   registry validate     Parse the registry without writing anything
+  snapshot export       Write the catalogue's observed facts to data/snapshot/
+  snapshot import       Load a snapshot into the database (registry sync first)
   sources list          List registered sources and whether they are collectable
   sources activate      Move a reviewed source from pending_review to active,
                          so it becomes eligible for collection (--id or --slug
@@ -88,6 +95,8 @@ func run(args []string) error {
 		return runMigrate(ctx, args[1:])
 	case "registry":
 		return runRegistry(ctx, args[1:])
+	case "snapshot":
+		return runSnapshot(ctx, args[1:])
 	case "sources":
 		return runSources(ctx, args[1:])
 	case "check-source":
@@ -100,6 +109,145 @@ func run(args []string) error {
 		fmt.Print(usage)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+// runSnapshot dispatches the snapshot subcommands.
+//
+// A snapshot is how the catalogue's observed facts leave the database and enter Git, so
+// that cloning this repository and running it produces a populated catalogue rather than
+// an empty one. See ADR-0025 and internal/application/snapshot.go.
+func runSnapshot(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("snapshot needs a subcommand: export or import")
+	}
+	switch args[0] {
+	case "export":
+		return runSnapshotExport(ctx, args[1:])
+	case "import":
+		return runSnapshotImport(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown snapshot subcommand %q, want export or import", args[0])
+	}
+}
+
+// DefaultSnapshotDir is where a snapshot lives in this repository.
+const DefaultSnapshotDir = "data/snapshot"
+
+const (
+	snapshotFactsFile    = "releases.ndjson"
+	snapshotManifestFile = "manifest.json"
+)
+
+func runSnapshotExport(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("snapshot export", flag.ContinueOnError)
+	dir := fs.String("dir", DefaultSnapshotDir, "directory to write the snapshot into")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	c, err := container(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close(ctx) }()
+
+	facts, err := c.Snapshots.ExportReleaseFacts(ctx)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(*dir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", *dir, err)
+	}
+
+	// NDJSON, one fact per line, written with SetEscapeHTML(false) so a release-notes
+	// URL keeps its ampersands instead of becoming \u0026 -- the file is meant to be
+	// read by people and by tools that are not Go's html/template.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	for i := range facts {
+		if err := enc.Encode(facts[i]); err != nil {
+			return fmt.Errorf("encode release %s: %w", facts[i].Release.ID, err)
+		}
+	}
+	factsPath := filepath.Join(*dir, snapshotFactsFile)
+	if err := os.WriteFile(factsPath, buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", factsPath, err)
+	}
+
+	vendors, products := postgres.SnapshotSlugs(facts)
+	manifest := application.SnapshotManifest{
+		FormatVersion: application.SnapshotVersion,
+		GeneratedAt:   c.Clock.Now().UTC().Truncate(time.Second),
+		ReleaseCount:  len(facts),
+		Vendors:       vendors,
+		Products:      products,
+		License:       application.SnapshotLicense,
+		Notice:        application.SnapshotNotice,
+	}
+	mbuf, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode manifest: %w", err)
+	}
+	manifestPath := filepath.Join(*dir, snapshotManifestFile)
+	if err := os.WriteFile(manifestPath, append(mbuf, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", manifestPath, err)
+	}
+
+	fmt.Printf("Exported %d release(s) to %s\n", len(facts), factsPath)
+	fmt.Printf("  vendors:  %s\n", strings.Join(vendors, ", "))
+	fmt.Printf("  products: %s\n", strings.Join(products, ", "))
+	fmt.Printf("  licence:  %s\n", application.SnapshotLicense)
+	return nil
+}
+
+func runSnapshotImport(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("snapshot import", flag.ContinueOnError)
+	dir := fs.String("dir", DefaultSnapshotDir, "directory to read the snapshot from")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	factsPath := filepath.Join(*dir, snapshotFactsFile)
+	f, err := os.Open(factsPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", factsPath, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var facts []application.ReleaseFact
+	sc := bufio.NewScanner(f)
+	// A fact with a long release-notes URL and an excerpt can exceed bufio's 64 KiB
+	// default, and the failure mode is a truncated line that fails to parse rather than
+	// a clear "line too long".
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for line := 1; sc.Scan(); line++ {
+		text := strings.TrimSpace(sc.Text())
+		if text == "" {
+			continue
+		}
+		var fact application.ReleaseFact
+		if err := json.Unmarshal([]byte(text), &fact); err != nil {
+			return fmt.Errorf("%s line %d: %w", factsPath, line, err)
+		}
+		facts = append(facts, fact)
+	}
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("read %s: %w", factsPath, err)
+	}
+
+	c, err := container(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close(ctx) }()
+
+	imported, skipped, err := c.Snapshots.ImportReleaseFacts(ctx, facts)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Imported %d release(s); %d already present.\n", imported, skipped)
+	return nil
 }
 
 // runConflicts dispatches the conflict subcommands.

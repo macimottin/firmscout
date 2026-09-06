@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "generatedAt": "2026-09-06T17:37:09Z",
+  "releaseCount": 48,
+  "vendors": [
+    "mikrotik"
+  ],
+  "products": [
+    "mikrotik-routeros"
+  ],
+  "license": "CC-BY-4.0",
+  "notice": "FirmScout catalogue snapshot. Facts observed from the vendors' own published sources, each with the evidence that justifies it. Verify against the linked source before acting on a version: this is a record of what a vendor published when FirmScout looked, not a guarantee of what is current now."
+}
