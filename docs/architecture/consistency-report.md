@@ -120,8 +120,10 @@ closing a family-targeted latest-flag hole that registering the first families m
 reachable. No device table, no device flag, no new API route — a device is a product, so it
 inherits aliases, categories, summaries and full-text search unchanged (ADR-0024 D1).
 
-**Verified by execution against the development database**, which holds real published
-MikroTik RouterOS releases collected from a recorded fixture, plus one open source conflict.
+**Verified by execution against the development database**, which at the time held real
+published MikroTik RouterOS releases plus one open source conflict. That conflict has since
+been dissolved by fixing its cause (above); the database now holds 48 releases and no open
+conflict.
 `migrate up` applied `00005`; `registry sync` reported `6 product relationship(s) written; 8
 product summary(ies) refreshed.` The API binary was then built and run against that database
 on a real socket, and the web app built and served against the API:
@@ -180,12 +182,34 @@ stage's work, and stating the gap is strictly better than the alternative failur
 device page silently inheriting the operating system's latest version and telling an operator
 to flash an image nobody verified their hardware accepts.
 
-**Also deliberately not done in this phase:** the live `6.49.18` / `7.24.2` source conflict was
-left open and untouched. The hypothesis that it reflected a missing device dimension was
-refuted by measurement (no fetched device page mentions any 6.x version); its real cause is a
-channel misparse in `dataset/sources/mikrotik/changelogs.yaml`, which is a separate change with
-its own evidence. Resolving an open conflict as a side effect of a device build is precisely
-the silent arbitration ADR-0020 exists to prevent.
+**Deliberately not done in that phase, and done since as its own change:** the live
+`6.49.18` / `7.24.2` source conflict was left open and untouched by the device build, because
+resolving an open conflict as a side effect of unrelated work is precisely the silent
+arbitration ADR-0020 exists to prevent. It has since been settled by fixing its cause, and the
+cause was not what either of the two earlier guesses said.
+
+The first guess — that the disagreement reflected a missing device dimension, one version for
+old hardware and one for new — was refuted by measurement: no fetched MikroTik device page
+mentions any 6.x version, a 32 MB SMIPS `hAP lite` and a 2007 `RB433` are both offered
+`7.24.2`, and every `6.49` byte sequence on those pages is an SVG path coordinate. The second
+guess, recorded here as "a channel misparse in `dataset/sources/mikrotik/changelogs.yaml`",
+named the wrong file and the wrong mechanism.
+
+Measured 2026-09-06, the real cause: MikroTik badges its newest v6 releases with **two**
+channel labels, `Stable` and `Long-term`, because those releases are both the long-term line
+and the stable of the v6 line. `html_selectors` took `FindMatcher(sel).First()` and discarded
+the rest in silence, and `Stable` is rendered first, so `6.49.18` through `6.49.21` were
+recorded as stable. They then disagreed with `upgrade.mikrotik.com/routeros/NEWESTa7.stable`,
+which reports the v7 line as its own filename says, and the platform booked a conflict between
+two sources that were each telling the truth.
+
+The engine now refuses to choose (`FieldSpec.Multiple`, default `error`), and
+`collectors/config/mikrotik/changelogs.yaml` declares the channel as a constant, because the
+page is MikroTik's long-term listing — `channelFilter":"longTerm`, server-rendered, 47 entries
+all badged Long-term, and no unfiltered view reachable by a plain GET. Re-collected against the
+live site on 2026-09-06: 48 releases published (47 long_term, 1 stable), `6.49.21` now carries
+`long_term`, **zero open conflicts and an empty review queue**. The conflict dissolved because
+its premise was wrong, not because anything arbitrated it.
 
 ### NOT VERIFIED — the explicit list, with reasons
 
