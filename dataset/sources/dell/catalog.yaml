@@ -1,0 +1,129 @@
+# =============================================================================
+# Source: Dell enterprise update catalogue -- REGISTERED AND REFUSED
+# =============================================================================
+# This is the entry DATA_SOURCES.md calls "the clearest illustration of why
+# compliance is a first-class field". It exists so the refusal is auditable in
+# public: the source is in the registry, visibly disabled, with the measurement
+# that disabled it quoted verbatim below. A source omitted from the registry
+# proves nothing -- it is indistinguishable from a source nobody thought of.
+#
+# ----------------------------- THE MEASUREMENT -------------------------------
+# Measured 2026-09-05T19:45:10Z (the response's own Date header), plain GET, no
+# credentials, FirmScout's declared User-Agent:
+#
+#   GET https://downloads.dell.com/robots.txt
+#     -> HTTP/2 200
+#     -> content-type: text/plain
+#     -> content-length: 64
+#     -> last-modified: Mon, 12 Apr 2021 17:53:37 GMT
+#     -> etag: "5a9e8fc3c42fd71:0"
+#     -> body, in full and in order, all four lines:
+#
+#          User-agent: *
+#          Allow: /manuals
+#          Allow: /topicspdf
+#          Disallow: /
+#
+# There is one group and it is the wildcard group, so it is the group that
+# applies to FirmScout. Under RFC 9309 sec 2.2.2 the most specific match wins:
+# for /catalog/Catalog.xml.gz the only rule that matches is "Disallow: /"
+# (the two Allow prefixes do not match the path at all), so the verdict is
+# disallow. robots_policy_status is therefore "disallowed" -- a measured
+# mechanical fact, not a judgement.
+#
+# Also measured, and recorded because it narrows what Dell permits even further:
+#   GET https://downloads.dell.com/manuals/
+#     -> HTTP/2 301, location: https://dl.dell.com/manuals/
+# Both of the Allow-ed prefixes now redirect to a different host, so this host
+# effectively serves robots.txt and nothing else that FirmScout may read.
+#
+# ------------------------- WHAT WAS DELIBERATELY NOT DONE --------------------
+# The catalogue itself was NOT fetched. Not a GET, not a HEAD, not a ranged
+# request. Its robots.txt is the whole point of this entry, and "we only looked
+# at the headers" is still a request to a path the host told us not to request.
+# Everything below that would normally be measured from the payload -- its
+# content type, its size, whether it serves an ETag, which products it covers --
+# is therefore absent rather than guessed. That absence is the honest shape of a
+# source this project refuses to read.
+#
+# Two consequences follow, and both are deliberate:
+#
+#   * No product is linked, and no Dell product is registered anywhere in the
+#     dataset. The domain permits a source with no product ("empty when the
+#     source covers a family or a whole catalogue", internal/domain/source.go),
+#     which is exactly this case. Asserting "this catalogue covers PowerEdge
+#     BIOS" would be a claim about bytes nobody in this project has read.
+#
+#   * There is NO collector config for this source, and collector_id is empty.
+#     A config in collectors/config/dell/ would describe how to parse a document
+#     robots.txt forbids fetching -- an expression of intent to collect. The
+#     refusal has to be legible in what the repository does not contain as well
+#     as in what it says.
+#
+# source_type is "download_portal", not "xml_feed". The URL ends .xml.gz, but a
+# filename is not a content type, and this pass measured no bytes from it. The
+# type field drives which engines may handle a source; recording a payload shape
+# nobody observed would put a guess in the field the scheduler trusts.
+#
+# authentication_type: none is the schema and column default and is NOT a
+# measurement. Establishing whether the catalogue demands credentials would mean
+# requesting the disallowed path. The vocabulary
+# (none|api_key|account_required|entitlement_required) has no member meaning
+# "not established", so the default stands and this comment is the disclosure.
+# It changes nothing operationally: the source is undispatchable on robots alone.
+#
+# ------------------------------- ADR-0018 ------------------------------------
+# Dispatch requires robots in (allowed, not_applicable) AND terms in (approved,
+# restricted) AND enabled AND health in (active, degraded). This row fails three
+# of the four independently, so no single edit can turn it on by accident.
+#
+# health is "disabled" rather than "pending_review". pending_review says a human
+# has work to do that could reasonably conclude either way. Nothing here is
+# pending: robots.txt says no. What would change this row is Dell publishing an
+# official API, changing robots.txt, or granting written permission -- an event
+# outside the project, not a review inside it.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: catalog
+  vendor: dell
+
+spec:
+  # No product: see the note above. This is a catalogue-scoped source whose
+  # coverage is unmeasured because measuring it is what robots.txt forbids.
+  source_type: download_portal
+  url: https://downloads.dell.com/catalog/Catalog.xml.gz
+
+  # Authority: downloads.dell.com is a Dell-controlled host. Authority and
+  # compliance are independent axes -- a source can be maximally authoritative
+  # and still be one FirmScout must not read.
+  official: true
+  quality_class: official_manufacturer
+
+  # Compliance -- the measurement is quoted in full above.
+  robots_policy_status: disallowed
+  robots_checked_at: 2026-09-05T19:45:10Z
+  terms_review_status: pending
+  terms_review_note: >-
+    Blocked on robots.txt, not on the terms review. Measured 2026-09-05:
+    downloads.dell.com/robots.txt is 64 bytes, one wildcard group, "Allow:
+    /manuals", "Allow: /topicspdf", "Disallow: /". The only rule matching
+    /catalog/Catalog.xml.gz is the Disallow, so collection is refused on a
+    mechanical fact. terms_review_status stays pending because no human has read
+    Dell's terms of use; the field is honest about a review that has not
+    happened rather than borrowing the robots verdict. Both would have to change
+    -- and Dell would have to publish an API or grant written permission -- for
+    this source to become collectable.
+  authentication_type: none
+
+  # Never collected from. This row exists to be visibly refused.
+  enabled: false
+  health: disabled
+
+  # No collector_id: no collector config exists for this source, deliberately.
+  # The catalogue's payload was never fetched, so no expected_content_type is
+  # recorded either.
+  check_frequency_seconds: 86400

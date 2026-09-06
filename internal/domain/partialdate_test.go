@@ -186,3 +186,52 @@ func TestPartialDateRoundTripsThroughPersistenceShape(t *testing.T) {
 			original.String(), original.Precision(), restored.String(), restored.Precision())
 	}
 }
+
+// TestPeriodEndIsTheLastDayThePrecisionCouldMean is the revert detector for the
+// windowing fix. If PeriodEnd ever returns the anchor again -- which is what the
+// release-history window compared against before -- a release the vendor dated only
+// "2025" is hidden from every window opening after 1 January 2025, and a release dated
+// "2025-09" from every window opening after the 1st of that month.
+func TestPeriodEndIsTheLastDayThePrecisionCouldMean(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		make func() (domain.PartialDate, error)
+		want string
+	}{
+		{"exact day is itself", func() (domain.PartialDate, error) { return domain.NewExactDate(2025, time.September, 5) }, "2025-09-05"},
+		{"month ends on its last day", func() (domain.PartialDate, error) { return domain.NewMonthDate(2025, time.September) }, "2025-09-30"},
+		{"a 31-day month", func() (domain.PartialDate, error) { return domain.NewMonthDate(2025, time.January) }, "2025-01-31"},
+		{"february in a common year", func() (domain.PartialDate, error) { return domain.NewMonthDate(2025, time.February) }, "2025-02-28"},
+		{"february in a leap year", func() (domain.PartialDate, error) { return domain.NewMonthDate(2024, time.February) }, "2024-02-29"},
+		{"year ends on 31 december", func() (domain.PartialDate, error) { return domain.NewYearDate(2025) }, "2025-12-31"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d, err := tc.make()
+			if err != nil {
+				t.Fatalf("build date: %v", err)
+			}
+			got := d.PeriodEnd().Format("2006-01-02")
+			if got != tc.want {
+				t.Errorf("PeriodEnd() = %s, want %s", got, tc.want)
+			}
+			// The bound is never earlier than the anchor, and for a reduced
+			// precision it is strictly later: that gap is the whole point.
+			if d.PeriodEnd().Before(d.Anchor()) {
+				t.Errorf("PeriodEnd() %s is before Anchor() %s", got, d.Anchor().Format("2006-01-02"))
+			}
+			if d.Precision() != domain.PrecisionExactDay && !d.PeriodEnd().After(d.Anchor()) {
+				t.Errorf("PeriodEnd() = Anchor() = %s at %s precision; the period has no width, so a window would hide it",
+					got, d.Precision())
+			}
+		})
+	}
+
+	// An unknown date denotes no period at all, so it has no end. The window falls
+	// back to first_observed_at for exactly this case.
+	if !domain.UnknownDate.PeriodEnd().IsZero() {
+		t.Errorf("UnknownDate.PeriodEnd() = %v, want the zero time", domain.UnknownDate.PeriodEnd())
+	}
+}

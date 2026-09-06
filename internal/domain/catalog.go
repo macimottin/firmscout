@@ -155,6 +155,70 @@ func NewProductAlias(id, productID, alias string, kind AliasKind) (ProductAlias,
 	}, nil
 }
 
+// RelationKind names why one product points at another.
+//
+// The vocabulary has exactly one member on purpose. "This device runs that operating
+// system" is the only product-to-product edge FirmScout has measured evidence for;
+// containment, succession and bundling are plausible and unevidenced, and a vocabulary
+// invented ahead of its data is a set of columns nobody can populate honestly. The
+// database CHECK is written IN ('runs_os') so widening it is one word.
+type RelationKind string
+
+const (
+	// RelationRunsOS records that a hardware model runs a named operating system. It
+	// is a navigation claim -- "the firmware for this box is published over there" --
+	// and deliberately not an applicability claim: which release of that OS applies to
+	// this exact model is a separate question this edge does not answer. See ADR-0024.
+	RelationRunsOS RelationKind = "runs_os"
+)
+
+// ValidRelationKind reports whether k is a declared relation kind.
+func ValidRelationKind(k RelationKind) bool {
+	switch k {
+	case RelationRunsOS:
+		return true
+	}
+	return false
+}
+
+// ProductRelationship is a directed edge between two products.
+//
+// It is registry-managed and provenanced the way every other registry row is -- by the
+// reviewable YAML file named in RegistryPath and by Git history -- rather than by an
+// evidence_id. Evidence rows describe what a collector fetched, with a content hash and
+// a collector version; an edge a human asserted in a pull request has neither, and
+// minting a collector-shaped row for it would be a weaker provenance mechanism wearing
+// the stronger one's clothes. See ADR-0016 and ADR-0024.
+type ProductRelationship struct {
+	ID            string
+	FromProductID string
+	ToProductID   string
+	Kind          RelationKind
+	// SourceNote records where the assertion came from, in the same free-text shape
+	// ProductAlias.SourceNote uses: the URL fetched, when it was fetched, and the
+	// excerpt that says it.
+	SourceNote   string
+	ManagedBy    ManagedBy
+	RegistryPath string
+}
+
+// Validate checks a relationship's invariants.
+func (r ProductRelationship) Validate() error {
+	if strings.TrimSpace(r.FromProductID) == "" {
+		return invalid("product_relationship.from_product_id", "must be set")
+	}
+	if strings.TrimSpace(r.ToProductID) == "" {
+		return invalid("product_relationship.to_product_id", "must be set")
+	}
+	if !ValidRelationKind(r.Kind) {
+		return invalid("product_relationship.kind", string(r.Kind)+" is not a known relation kind")
+	}
+	if r.FromProductID == r.ToProductID {
+		return invalid("product_relationship.to_product_id", "a product cannot run itself")
+	}
+	return nil
+}
+
 // Product is an exact model or a software product with an independently released
 // version stream.
 type Product struct {
@@ -194,6 +258,16 @@ func (p Product) Validate() error {
 		return invalid("product.lifecycle_status", string(p.LifecycleStatus)+" is not a known lifecycle status")
 	}
 	return nil
+}
+
+// IsHardwareModel reports whether this product names a physical device.
+//
+// A set model identifier is the whole test, and it is deliberately not exclusive with
+// having a release stream: a rack server is a device and also publishes its own BIOS
+// versions, so a product can be both. Callers that need "a device with no releases of
+// its own" ask the summary's release count, not this.
+func (p Product) IsHardwareModel() bool {
+	return strings.TrimSpace(p.ModelIdentifier) != ""
 }
 
 // EndOfLife reports whether the product has reached a state where new releases are not

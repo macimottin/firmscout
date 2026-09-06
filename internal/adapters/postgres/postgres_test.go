@@ -280,3 +280,14 @@ func usageRecord(id, idempotencyKey, apiKeyID string, at time.Time) application.
 		OccurredAt:     at,
 	}
 }
+
+// mustYearDate builds a year-precision date, the coarsest precision a vendor can
+// publish and the one a window boundary is most likely to get wrong.
+func mustYearDate(t *testing.T, y int) domain.PartialDate {
+	t.Helper()
+	pd, err := domain.NewYearDate(y)
+	if err != nil {
+		t.Fatalf("build date: %v", err)
+	}
+	return pd
+}

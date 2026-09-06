@@ -1,0 +1,80 @@
+# =============================================================================
+# Device: MikroTik hAP ax3
+# =============================================================================
+# A hardware model, registered as a Product with model_identifier set. It has no
+# release stream of its own: RouterOS releases are published against RouterOS,
+# and this document records only that this device runs it. Which RouterOS
+# release applies to this exact model is NOT recorded, because MikroTik does not
+# publish that per model in a form FirmScout has measured. See ADR-0024.
+#
+# Provenance -- every value below, and nothing else, comes from:
+#   GET https://mikrotik.com/product/hap_ax3
+#     fetched 2026-09-06T01:18:43Z, HTTP 200, 425479 bytes.
+#
+# Verbatim excerpts backing each field, whitespace-collapsed:
+#   name             <h1 class="font-bold mtk-h4 md:mtk-h3 lg:mtk-h1">hAP ax3
+#                    (the vendor writes the trailing digit as a superscript)
+#   model_identifier Product code </span> <span class="basis-1/2 font-light
+#                    break-words"> C53UiG+5HPaxD2HPaxD
+#   family           Architecture </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> ARM 64bit
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   runs             Operating System </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> RouterOS v7
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   category         breadcrumb: Home / Hardware / Indoor wireless
+#
+# Also measured on that page and deliberately NOT recorded, because the Product
+# model has no field for them and inventing one for six rows is not warranted:
+#   Size of RAM 1 GB, Storage size 128 MB, Suggested price $139.00.
+#
+# lifecycle_status is "unknown" and not "active". MikroTik publishes a
+# "Discontinued" sales badge on some product pages and no firmware-lifecycle
+# statement on any of them, and devices carrying that badge (RB433, RB1100AHx2)
+# were measured still being offered current 7.24.2 firmware. Neither "active"
+# nor "eol" is a claim this page supports; "unknown" is.
+#
+# ADR-0018 does not apply to this document. That policy, and the
+# TestEverySourceShipsPendingTermsReview regression test, govern Source
+# documents; a Product document causes no request to any manufacturer's server.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: mikrotik-hap-ax3
+  vendor: mikrotik
+  family: arm-64bit
+
+spec:
+  name: hAP ax³
+  model_identifier: C53UiG+5HPaxD2HPaxD
+  lifecycle_status: unknown
+
+  category_slugs:
+    - network-devices
+    - wireless-devices
+
+  aliases:
+    - alias: C53UiG+5HPaxD2HPaxD
+      kind: model_number
+      source_note: >-
+        The "Product code" specification on
+        https://mikrotik.com/product/hap_ax3, fetched 2026-09-06T01:18:43Z.
+        This is the string a fleet inventory holds.
+    - alias: hAP ax3
+      kind: common_misspelling
+      source_note: >-
+        The vendor writes the model with a superscript three (hAP ax³). A plain
+        "3" is what a keyboard produces, so it is registered as an alias rather
+        than left unmatchable.
+
+  runs:
+    - product: mikrotik-routeros
+      kind: runs_os
+      source_note: >-
+        https://mikrotik.com/product/hap_ax3, fetched 2026-09-06T01:18:43Z:
+        Operating System "RouterOS v7". The same page links the device-resolved
+        image
+        https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-arm64.npk

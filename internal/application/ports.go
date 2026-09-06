@@ -71,7 +71,8 @@ type CategoryRepository interface {
 	Upsert(ctx context.Context, c domain.Category) error
 }
 
-// ProductRepository persists products, families and aliases.
+// ProductRepository persists products, families, aliases and the edges between
+// products.
 type ProductRepository interface {
 	GetByID(ctx context.Context, id string) (domain.Product, error)
 	GetBySlug(ctx context.Context, slug string) (domain.Product, error)
@@ -83,6 +84,24 @@ type ProductRepository interface {
 
 	ReplaceAliases(ctx context.Context, productID string, aliases []domain.ProductAlias) error
 	ListAliases(ctx context.Context, productID string) ([]domain.ProductAlias, error)
+
+	// ReplaceRelationships makes a product's outgoing relationship set exactly the
+	// given list, in one transaction. Replacement rather than merge, for the same
+	// reason ReplaceAliases replaces: the registry file is the source of truth, and an
+	// edge deleted from that file must stop being asserted rather than linger.
+	//
+	// An empty rels is a supported call and the one that matters most: it is how a
+	// product that has stopped declaring any edge gets the edges it used to declare
+	// retracted. A caller that guards this on len(rels) > 0 has turned a replace into
+	// an append, which is the bug this port's name promises it does not have.
+	ReplaceRelationships(ctx context.Context, fromProductID string, rels []domain.ProductRelationship) error
+
+	// ListRelationships returns a product's outgoing relationships, ordered by target
+	// product slug so the output is stable for diffing against a registry file. It
+	// exists alongside ReplaceRelationships for the same reason ListAliases exists
+	// alongside ReplaceAliases: a destructive replace whose result cannot be read back
+	// is a write nothing can assert on.
+	ListRelationships(ctx context.Context, fromProductID string) ([]domain.ProductRelationship, error)
 
 	// ResolveByAlias returns every product a source's product hint could refer to.
 	//
@@ -167,6 +186,15 @@ type CandidateRepository interface {
 	SetResolvedProduct(ctx context.Context, candidateID, productID string) error
 	ListByState(ctx context.Context, state domain.CandidateState, limit int) ([]domain.CandidateRelease, error)
 	RecordValidation(ctx context.Context, candidateID string, results []domain.GateResult) error
+
+	// ListValidationResults returns the recorded verdict of every gate that ran for a
+	// candidate, in gate order.
+	//
+	// RecordValidation has always written these rows and nothing has ever read them
+	// back, which meant a reviewer could see that a candidate needed review but not
+	// which gate said so. A review queue without the failing gate is a queue nobody
+	// can act on.
+	ListValidationResults(ctx context.Context, candidateID string) ([]domain.GateResult, error)
 }
 
 // ReleaseRepository persists published releases. It has no Update method by design:
@@ -179,11 +207,46 @@ type ReleaseRepository interface {
 	// product, normalised version and channel, or "" when there is none.
 	FindDuplicate(ctx context.Context, productID, normalizedVersion, channel string) (string, error)
 
+	// ProductRefForRelease resolves the {slug, name} of the product a release is
+	// mapped to, for a caller that has only the release id and no product context of
+	// its own -- GET /releases/{id} is the one release read on that path; every other
+	// one (a product's history, its latest release) already knows the product it
+	// asked for. A release mapped to more than one product returns the
+	// lexicographically first by slug, deterministic rather than arbitrary; every
+	// release in the pilot dataset maps to exactly one. domain.ErrNotFound here means
+	// a release with no mapping at all, which Insert's own invariant ("a release with
+	// no mapping is unreachable") should make impossible outside a corrupted database.
+	ProductRefForRelease(ctx context.Context, releaseID string) (ReleaseProductRef, error)
+
 	// LatestForProduct returns the current latest-observed release for a product and
 	// channel. It returns domain.ErrNotFound when the product has no releases.
+	//
+	// An empty channel means ANY channel -- never "the channel whose name is the empty
+	// string". The two readings are indistinguishable over HTTP, where an omitted and an
+	// empty ?channel= arrive identically, and "any" subsumes the channel-less mapping
+	// anyway. This sentence is here because its absence was the whole defect: the
+	// PostgreSQL adapter implemented the other reading, so GET /products/{slug}/latest
+	// answered 404 to exactly the call the OpenAPI document names as its default, for
+	// every product whose releases all carry a channel.
+	//
+	// A withdrawn release is never returned, even when it holds the latest-observed
+	// flag (domain.Release.Serveable). The vendor pulled it; "what version should I be
+	// on?" is not answered with an image nobody should install.
+	//
+	// When more than one channel holds a latest-observed flag -- which is normal, the
+	// flag being per channel -- the answer is the one domain.LatestComparison would
+	// pick: release date first, then first-observed time, and never the version string
+	// (ADR-0017). That is the same rule the product summary's headline latestRelease
+	// uses, so the page and this call cannot name different releases for the same
+	// product at the same moment.
+	//
+	// An implementation that reads the flag but not this contract is what the two
+	// in-memory fakes did until they were corrected; a fake that answers a narrower
+	// question than the adapter is a test suite that certifies the bug.
 	LatestForProduct(ctx context.Context, productID, channel string) (domain.Release, error)
 
-	ListForProduct(ctx context.Context, productID string, limit int, cursor string) ([]domain.Release, string, error)
+	// ListForProduct returns a page of a product's releases, newest observed first.
+	ListForProduct(ctx context.Context, productID string, opts ReleaseListOptions) ([]domain.Release, string, error)
 
 	// ClearLatestFlag and SetLatestFlag maintain the derived latest-observed marker
 	// under the partial unique index.
@@ -197,17 +260,128 @@ type ReleaseRepository interface {
 	RefreshProductSummary(ctx context.Context, productID string) error
 }
 
+// SummaryRefresher rebuilds one product's precomputed summary row.
+//
+// It is a one-method port rather than the whole ReleaseRepository because the registry
+// sync has no business with releases: it needs a product to become readable, and
+// "readable" in this system means "has a product_summaries row". Narrowing the
+// dependency to the single method keeps SyncRegistry's surface honest and lets a test
+// substitute a counter. postgres.ReleaseRepo satisfies it structurally, with no change.
+type SummaryRefresher interface {
+	RefreshProductSummary(ctx context.Context, productID string) error
+}
+
+// ReleaseProductRef is the {slug, name} ProductRefForRelease resolves.
+type ReleaseProductRef struct {
+	Slug string
+	Name string
+}
+
+// ReleaseListOptions bounds a page of release history.
+//
+// Since exists because history depth is a tier boundary (api.md §2) and a window has to
+// be applied by the query, not by filtering a page the query already returned:
+// filtering afterwards would consume a cursor for rows the caller never sees, so a
+// windowed consumer would page through short, unexplained results.
+type ReleaseListOptions struct {
+	Limit  int
+	Cursor string
+	// Since windows the history returned. The zero value means the complete archive.
+	//
+	// A release is inside the window when the vendor's own release date could fall on
+	// or after Since, and -- only when the vendor published no date at all -- when
+	// FirmScout first observed it on or after Since. Windowing purely on observation
+	// time would make the window meaningless in a young catalogue; windowing purely on
+	// release date would silently drop every undated release.
+	//
+	// "Could fall" is the whole of the date rule. A reduced-precision date denotes a
+	// period, not an instant, so the comparison is against the last day that period
+	// could mean -- domain.PartialDate.PeriodEnd -- and not against its canonical
+	// anchor. A release the vendor dated only "2025" anchors at 1 January and would
+	// otherwise disappear from a window opening in September, even though the vendor
+	// may well have shipped it in December; a release dated "2025-09" would disappear
+	// from a window opening on 5 September for the same reason. Both are hidden
+	// releases, which is the one failure this window may not produce.
+	//
+	// Comparing at PeriodEnd instead can return a release whose true date turns out to
+	// sit just before the boundary, and that direction is the correct one to err in.
+	// Showing a caller one extra release discloses a fact the tier already entitles
+	// them to see at a coarser precision -- the release is in the catalogue, its date
+	// is published as a month or a year, and nothing about it is gated. Hiding a
+	// release they paid to see is a silent correctness failure: the page looks
+	// complete, the window member says where it starts, and neither reveals that a
+	// row inside it was dropped by an arithmetic convenience.
+	Since time.Time
+}
+
 // EvidenceRepository persists provenance records.
 type EvidenceRepository interface {
 	Insert(ctx context.Context, e domain.Evidence) error
 	GetByID(ctx context.Context, id string) (domain.Evidence, error)
 }
 
-// ReviewRepository persists items needing a human decision.
+// ReviewRepository persists items needing a human decision and serves the queue a human
+// reads.
 type ReviewRepository interface {
 	Create(ctx context.Context, item ReviewItem) error
-	ListOpen(ctx context.Context, limit int) ([]ReviewItem, error)
+	GetByID(ctx context.Context, id string) (ReviewItem, error)
+	// List returns a filtered, cursor-paginated page of the queue, ordered the way
+	// review_items_queue_idx is: highest priority first, oldest first within a
+	// priority.
+	List(ctx context.Context, f ReviewQueueFilter) ([]ReviewItem, string, error)
+	// Resolve closes an item. It refuses to re-resolve one that is already closed, so
+	// two reviewers racing produce one decision and one visible failure.
 	Resolve(ctx context.Context, id, resolution, resolvedBy string, at time.Time) error
+
+	// FindOpenBySubject returns the item already waiting on a decision about a subject,
+	// or domain.ErrNotFound when there is none.
+	//
+	// It exists because the job queue delivers at least once. Without a way to ask "is
+	// there already an item for this candidate", a redelivered validation filed a second
+	// copy, and a queue whose value depends on staying short accumulated one row per
+	// redelivery. review_items_open_subject_idx makes the answer unique rather than
+	// merely usually-unique.
+	FindOpenBySubject(ctx context.Context, subjectType, subjectID string) (ReviewItem, error)
+
+	// Retarget rewrites an open item in place so that it describes the decision as it
+	// stands now: its subject, kind, title, detail, payload and priority.
+	//
+	// A disagreement outlives the candidate that first exposed it. When the source that
+	// reported the disputed version moves on to another one, the queued item stops
+	// describing anything real -- and accepting it published a version no source still
+	// claimed. Rewriting the one item is preferred to closing it and filing another,
+	// because the item's age and position in the queue belong to the disagreement rather
+	// than to whichever candidate happened to surface it.
+	//
+	// It refuses an item that is already closed: a decision a human has made is not
+	// something the pipeline may quietly reword.
+	Retarget(ctx context.Context, item ReviewItem) error
+}
+
+// Review item subject types, written to review_items.subject_type.
+//
+// A queued decision is about a candidate whenever there is one a reviewer can accept.
+// When the disagreement outlived every candidate that could be published -- both sources
+// now report versions that are already published, so every later check is rejected as a
+// duplicate -- the subject is the conflict itself. An item pointing at a rejected
+// candidate would offer a reviewer an accept button that cannot work.
+const (
+	SubjectTypeCandidateRelease = "candidate_release"
+	SubjectTypeSourceConflict   = "source_conflict"
+)
+
+// ReviewQueueFilter selects part of the queue. Every field is optional; the zero value
+// means "open and in-progress items, newest priority first, default page size".
+type ReviewQueueFilter struct {
+	// States defaults to {"open", "in_progress"}. An item somebody started and did not
+	// finish is still an open decision.
+	States     []string
+	Kinds      []string
+	SLAClasses []string
+	VendorID   string
+	ProductID  string
+	Limit      int
+	Cursor     string
 }
 
 // ReviewItem is a queued human decision.
@@ -223,8 +397,125 @@ type ReviewItem struct {
 	Payload       map[string]string
 	PriorityScore int
 	SLAClass      string
+	State         string
+	Resolution    string
+	AssignedTo    string
+	ResolvedBy    string
+	ResolvedAt    time.Time
 	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
+
+// Review item states, matching the review_items.state CHECK constraint.
+const (
+	ReviewStateOpen       = "open"
+	ReviewStateInProgress = "in_progress"
+	ReviewStateResolved   = "resolved"
+	ReviewStateDismissed  = "dismissed"
+)
+
+// Review item payload keys written by this phase. They are constants because a reviewer
+// UI reads them by name, and a typo in a map key is a field that silently never appears.
+const (
+	PayloadKeyConflictID       = "conflict_id"
+	PayloadKeyConflictVersions = "conflict_versions"
+	PayloadKeyConflictSources  = "conflict_sources"
+	PayloadKeyFailingGate      = "failing_gate"
+	// PayloadKeyConflictCandidates lists every candidate currently in dispute, sorted.
+	// The subject names the one a reviewer would act on; this names the others, so a
+	// candidate parked in human_review_required is always reachable from the queue even
+	// when it is not the item's subject.
+	PayloadKeyConflictCandidates = "conflict_candidates"
+)
+
+// ConflictRepository persists what each source currently reports and the disagreements
+// that follow from it.
+//
+// It is one port rather than two because the two halves are never used apart: a
+// disagreement is only meaningful against the observations that produced it, and an
+// observation is only recorded in order to detect one.
+type ConflictRepository interface {
+	// RecordObservation writes what a source currently reports for a product and
+	// channel, replacing that source's previous row. The caller decides whether the
+	// new observation is the later one; see domain.LaterObservation.
+	RecordObservation(ctx context.Context, obs domain.SourceObservation) error
+
+	// ObservationsForProduct returns every source's current observation for a product
+	// and channel, with the source's authority and eligibility resolved from the
+	// registry at read time so a reclassified or disabled source stops counting
+	// immediately.
+	ObservationsForProduct(ctx context.Context, productID, channel string) ([]domain.SourceObservation, error)
+
+	// UpsertOpenConflict opens the conflict for a product and channel, or refreshes the
+	// one already open with the current participants. created reports whether this call
+	// opened it, which is what stops one disagreement producing one review item per
+	// check.
+	UpsertOpenConflict(ctx context.Context, c domain.SourceConflict) (stored domain.SourceConflict, created bool, err error)
+
+	// LinkReviewItem attaches the review item a human will act on to an open conflict.
+	LinkReviewItem(ctx context.Context, conflictID, reviewItemID string) error
+
+	// CloseOpenConflict resolves whatever conflict is open for a product and channel.
+	// closed reports whether there was one; a product with no open conflict is the
+	// normal case, not an error.
+	CloseOpenConflict(ctx context.Context, productID, channel, resolution, resolvedBy string, at time.Time) (closed bool, err error)
+
+	// ResolveConflict closes one conflict by id, for a human decision that names it.
+	ResolveConflict(ctx context.Context, id, resolution, resolvedBy string, at time.Time) error
+
+	GetConflict(ctx context.Context, id string) (domain.SourceConflict, error)
+	// OpenConflictFor returns the open conflict for a product and channel, or
+	// domain.ErrNotFound.
+	OpenConflictFor(ctx context.Context, productID, channel string) (domain.SourceConflict, error)
+	ListOpenConflicts(ctx context.Context, limit int) ([]domain.SourceConflict, error)
+}
+
+// AuditRepository persists who decided what.
+//
+// Blueprint §16 requires "the audit trail of who approved it" for every correction and
+// publication decision. The audit_events table has existed since the initial migration
+// with exactly the right columns and nothing has ever written to it.
+type AuditRepository interface {
+	Record(ctx context.Context, e AuditEvent) error
+	ListForSubject(ctx context.Context, subjectType, subjectID string, limit int) ([]AuditEvent, error)
+}
+
+// AuditEvent is one recorded decision.
+type AuditEvent struct {
+	ID        string
+	ActorType string
+	ActorID   string
+	// ActorAuthenticated reports whether the platform verified this actor's identity.
+	// Every row this phase writes sets it false, because FirmScout has no login yet and
+	// the actor is a string the caller asserted. Recording that honestly is the point:
+	// when authentication arrives, rows written before it must not be mistaken for
+	// verified ones. See ADR-0021.
+	ActorAuthenticated bool
+	Action             string
+	SubjectType        string
+	SubjectID          string
+	BeforeState        map[string]string
+	AfterState         map[string]string
+	Reason             string
+	RequestID          string
+	TraceID            string
+	OccurredAt         time.Time
+}
+
+// Actor types, matching the audit_events.actor_type CHECK constraint.
+const (
+	ActorTypeHuman       = "human"
+	ActorTypeSystem      = "system"
+	ActorTypeAI          = "ai"
+	ActorTypeContributor = "contributor"
+)
+
+// Audit actions written by this phase.
+const (
+	AuditActionReviewAccepted   = "review.accepted"
+	AuditActionReviewRejected   = "review.rejected"
+	AuditActionConflictResolved = "conflict.resolved"
+)
 
 // ---------------------------------------------------------------------------
 // Collection ports
@@ -433,15 +724,60 @@ type UsageRecorder interface {
 // Read models
 // ---------------------------------------------------------------------------
 
+// ProductSourceRef is one entry of ProductSummary.OfficialSources: a source that has
+// actually contributed a currently-mapped, non-withdrawn release to the product, not
+// merely a source registered for it. Kind already went through domain.PublicSourceKind
+// -- the postgres adapter applies that mapping when it scans the raw sources.source_type
+// value the summary's official_sources column stores, the same function a release's
+// Source.Kind goes through, so the two can never disagree about what "kind" means for
+// the same underlying source. A caller renders Kind as-is; it does not map it again.
+type ProductSourceRef struct {
+	Slug     string
+	URL      string
+	Kind     string
+	Official bool
+}
+
+// ProductConflictSummary is the detail behind ProductSummary.HasSourceConflict when it
+// is true: which channel and versions are disputed, how many sources, and when it was
+// first detected. See RefreshProductSummary for why this can surface only one open
+// conflict when a product has more than one channel independently disputed at once.
+type ProductConflictSummary struct {
+	Channel     string
+	Versions    []string
+	SourceCount int
+	DetectedAt  time.Time
+}
+
+// ProductRunsRef is the {slug, name, kind} of a product another product runs.
+//
+// It carries the relation kind rather than assuming runs_os so that a second kind, when
+// one is ever evidenced, does not silently render as the first.
+type ProductRunsRef struct {
+	Slug string
+	Name string
+	Kind domain.RelationKind
+}
+
 // ProductSummary is the precomputed row the public site and search read, so that a
 // product page is one indexed read rather than a six-way join.
 type ProductSummary struct {
-	ProductID            string
-	VendorSlug           string
-	VendorName           string
-	ProductSlug          string
-	ProductName          string
-	FamilyName           string
+	ProductID   string
+	VendorSlug  string
+	VendorName  string
+	ProductSlug string
+	ProductName string
+	FamilyName  string
+	// ModelIdentifier is the vendor's published product code for a hardware model, and
+	// empty for a software product. It is carried here for display only: model-number
+	// search runs through the model_number alias, which is already in aliases_text and
+	// therefore already in the generated search vector.
+	ModelIdentifier string
+	// Runs lists the products this product runs -- for a device, the operating system
+	// whose releases are the ones a fleet manager is actually looking for. Never nil in
+	// practice (RefreshProductSummary defaults the column to an empty JSON array), but
+	// a caller should treat a nil slice as "none" rather than assume non-nil.
+	Runs                 []ProductRunsRef
 	Aliases              []string
 	CategorySlugs        []string
 	LatestReleaseID      string
@@ -453,9 +789,19 @@ type ProductSummary struct {
 	ReleaseCount         int
 	LifecycleStatus      string
 	HasSourceConflict    bool
-	AdvisoryCount        int
-	LastVerifiedAt       time.Time
-	RefreshedAt          time.Time
+	// OfficialSources lists the product's real contributing sources -- see
+	// ProductSourceRef. Never nil in practice (RefreshProductSummary defaults the
+	// column to an empty JSON array), but a caller should treat a nil slice as "none"
+	// rather than assume non-nil.
+	OfficialSources []ProductSourceRef
+	// Conflict is non-nil exactly when HasSourceConflict is true. Both are derived
+	// fresh by RefreshProductSummary on every refresh -- resolving the conflict clears
+	// this the same way it flips HasSourceConflict back to false, never leaving the
+	// two disagreeing about whether a conflict is currently open.
+	Conflict       *ProductConflictSummary
+	AdvisoryCount  int
+	LastVerifiedAt time.Time
+	RefreshedAt    time.Time
 }
 
 // SummaryRepository reads precomputed product summaries and serves search.

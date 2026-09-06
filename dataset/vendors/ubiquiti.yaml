@@ -1,0 +1,31 @@
+# =============================================================================
+# Vendor: Ubiquiti
+# =============================================================================
+# Registered to hold dataset/sources/ubiquiti/firmware-latest.yaml, the source
+# DATA_SOURCES.md recommends as the substitute for Dell in the "clean, official,
+# structured API" pilot profile -- the profile Dell fits technically and cannot
+# fill, because its robots.txt forbids collection.
+#
+# Measured 2026-09-05: ubnt.com and ui.com are the same operation. The firmware
+# API is served from fw-update.ubnt.com, its HAL self-links point at
+# fw-update.ui.com, and its binary links point at fw-download.ubnt.com. That
+# cross-linking is the evidence for treating fw-update.ubnt.com as a
+# vendor-controlled host; see the source file for the exact payload.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Vendor
+
+metadata:
+  slug: ubiquiti
+
+spec:
+  name: Ubiquiti
+  homepage_url: https://ui.com
+  country_code: US
+  notes: >-
+    Networking and wireless hardware manufacturer. Registered for the official
+    firmware API at fw-update.ubnt.com, which is registered disabled pending the
+    ADR-0018 terms review. No Ubiquiti product is registered: the endpoint is
+    catalogue-scoped and its 224 distinct product identifiers are opaque codes
+    such as "2WA", not names a public catalogue should be seeded with unmapped.

@@ -222,6 +222,31 @@ func resolveDate(cfg *Config, label string, c container, name string, missingOpt
 // constructs through domain.NewMonthDate, which has no parameter for a day, so there
 // is no code path -- not a bug, not a future edit -- by which this function could
 // return a day the source did not publish.
+//
+// ZONES, AND WHY THERE IS NO UTC NORMALISATION HERE. The calendar components below are
+// read in the offset the source published them in. The rejected alternative is the
+// obvious one, and it was in this function: convert the parsed instant to UTC first,
+// then take Year/Month/Day. That answers with OUR calendar instead of the vendor's. A
+// source writing "Wed, 12 Aug 2026 17:00:00 -0700" published the twelfth; normalised to
+// UTC it becomes the thirteenth, and FirmScout then stores 13 August at exact_day
+// precision, where nothing downstream can tell it from a fact -- gate 5 only bounds
+// plausibility, the database CHECK only enforces the anchoring rule, and the presenter
+// faithfully renders whatever it is handed. Manufacturing a day the source never
+// published is the exact failure ADR-0017 exists to prevent.
+//
+// The same rule settles what a zone-bearing layout means for a reduced-precision field,
+// which config validation accepts because layoutHasDay is false for a layout such as
+// "Jan 2006 -0700": one rule for all three precisions, namely take the wall clock the
+// source wrote and discard everything below the declared precision. "Aug 2026 +0200" is
+// therefore August 2026, not the July a UTC normalisation would produce by rolling
+// midnight on the first backwards. validateDateField is written against this rule and
+// says so.
+//
+// It also covers the zoneless case with no special path: time.Parse with a layout that
+// carries no zone yields a UTC time, and reading UTC components off a UTC time is the
+// identity. That equivalence is precisely why the old .UTC() call looked harmless --
+// it conflated "already UTC because the source stated no offset" with "converted to UTC
+// from a stated offset". Do not reintroduce it.
 func parseDate(text, layout string, precision domain.DatePrecision) (domain.PartialDate, error) {
 	var t time.Time
 
@@ -231,6 +256,10 @@ func parseDate(text, layout string, precision domain.DatePrecision) (domain.Part
 		if err != nil {
 			return domain.UnknownDate, fmt.Errorf("%q is not a Unix timestamp in seconds", text)
 		}
+		// The one deliberate exception to the rule above, because an epoch names an
+		// instant and states no offset at all: there is no source calendar to
+		// preserve. UTC is chosen over the machine's local zone so that the recorded
+		// day does not depend on where the collector happened to run.
 		t = time.Unix(secs, 0).UTC()
 	case layout == "" && precision == domain.PrecisionYearOnly:
 		year, err := strconv.Atoi(strings.TrimSpace(text))
@@ -245,9 +274,12 @@ func parseDate(text, layout string, precision domain.DatePrecision) (domain.Part
 		if err != nil {
 			return domain.UnknownDate, fmt.Errorf("%q does not match layout %q", text, layout)
 		}
-		t = parsed.UTC()
+		t = parsed
 	}
 
+	// t carries the source's own offset (or UTC, when the source stated none), and
+	// Year/Month/Day report in t's location, so these are the components the vendor
+	// wrote. Nothing between here and the constructor may move t to another zone.
 	switch precision {
 	case domain.PrecisionExactDay:
 		return domain.NewExactDate(t.Year(), t.Month(), t.Day())

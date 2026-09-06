@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +153,91 @@ func TestGatesRouteToReviewRatherThanRejecting(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The revert detector for gate 10. If the gate goes back to always passing, or the
+// conflicting-version list stops reaching it, this test fails: it asserts both the
+// decision and that gate 10 is the gate the verdict names, so a candidate routed to
+// review by some other gate cannot make it pass by accident.
+func TestGateTenRoutesUnresolvedConflictToReview(t *testing.T) {
+	t.Parallel()
+	c, ctx := baseCandidate(t), baseContext(t)
+	ctx.ConflictingSourceVersions = []string{"7.25.0", "7.26.0"}
+
+	v := domain.RunValidationGates(c, ctx)
+
+	if v.Decision != domain.GateReviewRequired {
+		t.Fatalf("decision = %q, want review_required (%s)", v.Decision, v.Reason)
+	}
+	if !strings.Contains(v.Reason, string(domain.GateMultiSourceAgree)) {
+		t.Fatalf("verdict reason %q does not name gate 10", v.Reason)
+	}
+	gate := gateResult(t, v, domain.GateMultiSourceAgree)
+	if gate.Outcome != domain.GateReviewRequired {
+		t.Fatalf("gate 10 outcome = %q, want review_required", gate.Outcome)
+	}
+	for _, want := range []string{"7.25.0", "7.26.0"} {
+		if !strings.Contains(gate.Detail, want) {
+			t.Errorf("gate 10 detail %q does not name the disagreeing version %q", gate.Detail, want)
+		}
+	}
+	if v.Publishable() {
+		t.Error("a candidate other sources disagree with reported itself publishable")
+	}
+}
+
+// A disagreement this source outranks does not block publication, but it is named, so a
+// maintainer reading validation_results sees that a disagreement existed and why it did
+// not stop the release.
+func TestGateTenPassesWithOutrankedVersionsNamed(t *testing.T) {
+	t.Parallel()
+	c, ctx := baseCandidate(t), baseContext(t)
+	ctx.OutrankedSourceVersions = []string{"7.24.1"}
+
+	v := domain.RunValidationGates(c, ctx)
+
+	if !v.Publishable() {
+		t.Fatalf("an outranked disagreement blocked publication: %s", v.Reason)
+	}
+	gate := gateResult(t, v, domain.GateMultiSourceAgree)
+	if gate.Outcome != domain.GatePassed {
+		t.Fatalf("gate 10 outcome = %q, want passed", gate.Outcome)
+	}
+	if !strings.Contains(gate.Detail, "7.24.1") {
+		t.Errorf("gate 10 detail %q does not name the outranked version", gate.Detail)
+	}
+}
+
+// An unresolved disagreement wins over an outranked one: the authority ladder demotes,
+// it never promotes, so a lower-authority agreement cannot cancel a same-tier dispute.
+func TestGateTenPrefersTheUnresolvedDisagreement(t *testing.T) {
+	t.Parallel()
+	c, ctx := baseCandidate(t), baseContext(t)
+	ctx.ConflictingSourceVersions = []string{"7.25.0"}
+	ctx.OutrankedSourceVersions = []string{"7.24.1"}
+
+	v := domain.RunValidationGates(c, ctx)
+
+	if v.Decision != domain.GateReviewRequired {
+		t.Fatalf("decision = %q, want review_required (%s)", v.Decision, v.Reason)
+	}
+	if gate := gateResult(t, v, domain.GateMultiSourceAgree); !strings.Contains(gate.Detail, "7.25.0") {
+		t.Errorf("gate 10 detail %q names the outranked version rather than the unresolved one", gate.Detail)
+	}
+}
+
+// gateResult finds one gate's recorded verdict, failing the test when the gate did not
+// run at all -- a gate that silently stopped running is the failure mode these tests
+// exist to catch.
+func gateResult(t *testing.T, v domain.ValidationVerdict, gate domain.ValidationGate) domain.GateResult {
+	t.Helper()
+	for _, r := range v.Results {
+		if r.Gate == gate {
+			return r
+		}
+	}
+	t.Fatalf("gate %q did not run", gate)
+	return domain.GateResult{}
 }
 
 // A community source never publishes automatically, however confident the extraction.

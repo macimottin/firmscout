@@ -1,0 +1,24 @@
+{
+  "collectorId": "test.rss-basic",
+  "note": "SYNTHETIC. A category badge nobody has interpreted ('Nightly') is a hard error for that candidate, never a pass-through. The entry with a known badge is unaffected.",
+  "warningsContain": [
+    "value \"nightly\" has no entry in the field's map"
+  ],
+  "candidates": [
+    {
+      "rawVersion": "7.24.2",
+      "normalizedVersion": "7.24.2",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-09-03"
+      },
+      "releaseType": "embedded_os",
+      "channel": "stable",
+      "applicability": {
+        "productHint": "test-vendor-thing"
+      },
+      "evidenceExcerptContains": "Test Vendor Thing 7.24.2 released",
+      "confidenceAtLeast": 0.9
+    }
+  ]
+}

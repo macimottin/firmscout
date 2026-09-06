@@ -1,0 +1,138 @@
+# =============================================================================
+# Source: Ubiquiti firmware-latest API
+# =============================================================================
+# DATA_SOURCES.md offers this as the substitute for Dell in the "clean API"
+# pilot profile: an official, structured, robots-permitted endpoint that fills
+# the role Dell's catalogue fits technically and is refused for. Registering it
+# is what makes that recommendation checkable.
+#
+# ---------------------------- ROBOTS, MEASURED -------------------------------
+# Measured 2026-09-05T19:45:23Z, FirmScout's declared User-Agent:
+#   GET https://fw-update.ubnt.com/robots.txt
+#     -> HTTP/2 404
+#     -> content-type: text/plain; charset=utf-8
+#     -> content-length: 9
+#     -> body: "Not Found"
+#
+# A 404 is "unavailable" under RFC 9309 sec 2.3.1.3, which makes it a full
+# allow, and RobotsCache.fetch treats every 4xx that way
+# (internal/adapters/fetch/robots.go). robots_policy_status is "allowed", not
+# "not_applicable", for the reason already argued for upgrade.mikrotik.com:
+# not_applicable is for sources robots.txt does not govern, and this is an
+# ordinary public HTTPS host that it does govern -- the file is merely absent.
+# Both values are dispatchable, so the choice changes no behaviour; it changes
+# whether the registry states the true reason.
+#
+# -------------------------- THE ENDPOINT, MEASURED ---------------------------
+# HEAD, 2026-09-05T19:48:17Z:
+#   HEAD https://fw-update.ubnt.com/api/firmware-latest
+#     -> HTTP/2 200
+#     -> content-type: application/json; charset=utf-8
+#     -> content-length: 744990
+#     -> vary: Accept-Encoding, Origin
+#     -> access-control-allow-origin: *
+#     -> access-control-expose-headers: WWW-Authenticate,Server-Authorization
+#     -> x-request-id: <a fresh uuid per request>
+#     -> NO etag. NO last-modified. NO cache-control. NO accept-ranges.
+#
+# GET with "Range: bytes=0-0", 2026-09-05T19:48:28Z: answered HTTP 200 with the
+# entire 744990-byte body. The server ignores Range, so a partial read is not
+# available either.
+#
+# THE COST THIS MEASUREMENT ESTABLISHES, and it qualifies the "clean API" label:
+# there is no conditional-request validator of any kind. Every check downloads
+# 745 KB in full and the only change signal available is a hash of the body --
+# the most expensive signal in the vocabulary. Compare MikroTik's NEWESTa7.stable,
+# which answers an unchanged check with a 304 over a body of a few bytes. This
+# endpoint is clean in structure and expensive in bandwidth, and the second half
+# of that sentence was missing from DATA_SOURCES.md before this pass.
+#
+# The body was read once, in that Range attempt, and it is HAL JSON:
+#   {"_embedded":{"firmware":[ ... ]},"_links":{ ... }}
+#   785 entries, 224 distinct "product" codes, 353 distinct "platform" values.
+#   channels: release (615), beta-public (168), lts (1), release-cn (1).
+#   Each entry: channel, created, file_size, id, md5, sha256_checksum, platform,
+#   product, probability_computed, tags.fullVersion, updated, version,
+#   version_major, version_minor, version_patch, version_prerelease, _links.
+#   Latest "updated" across the corpus: 2026-09-04T13:21:21Z.
+#   _links.self.href points at a DIFFERENT host, https://fw-update.ui.com/api/...,
+#   and _links.data.href at https://fw-download.ubnt.com/data/... .
+#
+# Two things in that shape matter to this project specifically:
+#   * "created" and "updated" are RFC 3339 timestamps the vendor publishes, so a
+#     collector could record exact_day dates here without inferring anything
+#     (ADR-0017). That is rarer than it sounds and is the real attraction.
+#   * version_major/minor/patch are the vendor's own decomposition. They are
+#     data, not a licence to order releases: version strings stay opaque and
+#     "latest" remains release date then first observed.
+#
+# --------------------------- WHY NO COLLECTOR CONFIG -------------------------
+# Of the three sources registered in this pass, this is the one that ought to
+# have a collector config: robots permits it, it is official, the payload is
+# well-formed JSON, and the vendor publishes real dates. It has none, for a
+# reason that is mechanical rather than a matter of taste. The engine it needs is
+# json_path, and json_path is a declared-but-unimplemented roadmap engine
+# (roadmapEngines in internal/adapters/collectors/config.go); LoadDir refuses a
+# config naming one with "not implemented yet". A config here would not sit
+# harmlessly waiting -- it would fail to load. This source waits on the engine.
+#
+# ------------------------------- ADR-0018 ------------------------------------
+# enabled: false, terms_review_status: pending. robots is measured and permits
+# this path; nobody has read Ubiquiti's terms of use, and the absence of a robots
+# restriction is not the presence of permission. A reviewer also has a specific
+# question to settle here that MikroTik's sources do not raise: the response
+# advertises access-control-expose-headers: WWW-Authenticate, so the API has an
+# authenticated mode even though it served this request without credentials.
+# Whether an endpoint that can authenticate but did not is "public" in the sense
+# the terms mean is a judgement, not a measurement.
+#
+# authentication_type: none records what was observed -- the request carried no
+# credentials and was answered 200.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: firmware-latest
+  vendor: ubiquiti
+
+spec:
+  # No product: the endpoint is catalogue-scoped, covering 224 distinct product
+  # codes in one response. covers_products is left empty rather than filled with
+  # 224 opaque vendor codes that map to no registered product.
+  source_type: json_endpoint
+  url: https://fw-update.ubnt.com/api/firmware-latest
+
+  # Authority
+  official: true
+  quality_class: official_manufacturer
+
+  # Compliance -- see the ADR-0018 note above.
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-05T19:45:23Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: a human must review Ubiquiti's terms of use before this source is
+    enabled. Measured 2026-09-05: fw-update.ubnt.com/robots.txt returns HTTP 404
+    with the body "Not Found", which RFC 9309 sec 2.3.1.3 and
+    RobotsCache.fetch both treat as a full allow, so robots imposes no
+    restriction. No terms document has been read. The response also advertises
+    access-control-expose-headers WWW-Authenticate, so the API has an
+    authenticated mode it did not demand here; whether that makes it public in
+    the sense the terms mean is part of the judgement that has not been made.
+  authentication_type: none
+
+  # Not collected from until the terms review above is complete.
+  enabled: false
+  health: pending_review
+
+  # No collector_id: json_path is not implemented, so no config can exist yet.
+  expected_content_type: application/json
+
+  # Daily, with a six-hour floor. The floor is unusually high on purpose: the
+  # endpoint serves no ETag, no Last-Modified and ignores Range, so every single
+  # check transfers 745 KB whether anything changed or not. Cheap sources are
+  # polled often; this one is not cheap, and the schedule says so.
+  check_frequency_seconds: 86400
+  min_frequency_seconds: 21600

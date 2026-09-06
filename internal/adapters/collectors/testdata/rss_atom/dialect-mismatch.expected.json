@@ -1,0 +1,8 @@
+{
+  "collectorId": "test.rss-basic",
+  "note": "SYNTHETIC. This collector declares release_container: item; the document is Atom. Zero candidates, no error, and a warning naming both what was asked for and what was found.",
+  "warningsContain": [
+    "release_container \"item\" was declared but the document is Atom"
+  ],
+  "candidates": []
+}

@@ -127,9 +127,17 @@ type ValidationContext struct {
 	// the candidate are recognised for the product.
 	ApplicabilityKnown bool
 
-	// ConflictingSourceVersions holds versions reported by other active sources for
-	// the same product and channel that disagree with this candidate.
+	// ConflictingSourceVersions holds versions reported by other eligible sources for
+	// the same product and channel that this candidate's source does not outrank.
+	// A non-empty value routes to review and is never auto-resolved (ADR-0020).
 	ConflictingSourceVersions []string
+
+	// OutrankedSourceVersions holds versions reported by eligible sources this
+	// candidate's source outranks on the authority ladder. They do not block
+	// publication, but they are named in the gate's detail so a reviewer reading
+	// validation_results sees that a disagreement existed and why it did not stop the
+	// release.
+	OutrankedSourceVersions []string
 
 	// FutureDateTolerance bounds how far ahead of Now a release date may be before
 	// it is treated as implausible. Vendors do occasionally post-date a release.
@@ -278,11 +286,17 @@ func RunValidationGates(c CandidateRelease, ctx ValidationContext) ValidationVer
 		record(GateApplicability, GatePassed, "applicability constraints are consistent with the product")
 	}
 
-	// 10. Multi-source agreement. A disagreement is never auto-resolved.
-	if len(ctx.ConflictingSourceVersions) > 0 {
+	// 10. Multi-source agreement. A disagreement between sources of equal authority is
+	// never auto-resolved; one this source outranks is recorded and passed.
+	switch {
+	case len(ctx.ConflictingSourceVersions) > 0:
 		record(GateMultiSourceAgree, GateReviewRequired,
 			"other active sources report a different version: "+strings.Join(ctx.ConflictingSourceVersions, ", "))
-	} else {
+	case len(ctx.OutrankedSourceVersions) > 0:
+		record(GateMultiSourceAgree, GatePassed,
+			"a lower-authority source reports a different version ("+
+				strings.Join(ctx.OutrankedSourceVersions, ", ")+"); the higher-authority value stands")
+	default:
 		record(GateMultiSourceAgree, GatePassed, "no disagreement among active sources")
 	}
 

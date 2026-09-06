@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/macimottin/firmscout/internal/application"
@@ -15,23 +16,50 @@ import (
 )
 
 // Handlers are thin on purpose. Each one parses and validates input, calls exactly one
-// read port, and hands the result to a presenter. There is no business decision in
+// use case, and hands the result to a presenter. There is no business decision in
 // this file: what "latest" means, whether a release may be published, how a version is
-// compared -- all of that lives in internal/domain and internal/application, where it
-// is testable without an HTTP request and reusable from the CLI and the worker.
+// compared, how deep a plan's history goes -- all of that lives in internal/domain and
+// internal/application, where it is testable without an HTTP request and reusable from
+// the CLI and the worker.
+//
+// # Why every read handler goes through a use case
+//
+// It did not, and the cost was exactly what the rule exists to prevent. When the
+// handlers called repositories directly, this adapter *was* the read-side application
+// layer, and the two copies had already drifted: ListReleases.Execute defaulted the
+// page to 50 and clamped an over-large limit down to 50, while this file defaulted to
+// 20 and clamped to 100. Worse, the plan history window was added to both rather than
+// to one, so a tier-entitlement rule existed twice with only one copy reachable. The
+// import graph was legal throughout -- the handler imported application for
+// HistoryWindow while keeping the orchestration itself -- which is why archtest could
+// not see any of it.
+//
+// The two endpoints with no use case behind them, GET /vendors and GET /releases/{id},
+// are single reads with no rule to duplicate; they stay direct and are named here so
+// the omission reads as a decision rather than an oversight.
 
-// Query parameter limits, from docs/architecture/api.md §2 and docs/api/openapi.yaml.
+// Query parameter limits.
+//
+// The documented contract (api.md §2, openapi.yaml) is enforced here, because clamping
+// a caller's parameter is parsing, which is this layer's job. Where the application
+// declares the same bound it is used rather than restated, so the two cannot drift;
+// the use cases clamp again on their own input, which is the backstop for a caller that
+// is not an HTTP request.
 const (
-	searchQueryMaxRunes = 200
 	searchQueryMinRunes = 2
-	searchLimitDefault  = 20
-	searchLimitMax      = 50
+	// searchQueryMaxBytes is a byte bound, not a rune bound, because
+	// SearchProducts.Execute truncates by bytes: handing it a longer string would let
+	// it cut a multi-byte rune in half and send invalid UTF-8 to the trigram index,
+	// which is a 500 rather than a search.
+	searchQueryMaxBytes = application.MaxSearchQueryLength
+	searchLimitDefault  = application.DefaultSearchResults
+	searchLimitMax      = application.MaxSearchResults
 
 	vendorLimitDefault = 50
 	vendorLimitMax     = 200
 
-	releaseLimitDefault = 20
-	releaseLimitMax     = 100
+	releaseLimitDefault = application.DefaultReleasePageSize
+	releaseLimitMax     = application.MaxReleasePageSize
 )
 
 // Sort keys accepted by the releases endpoint. There is no "version" key, and its
@@ -63,49 +91,44 @@ var validChannels = map[string]bool{
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-
 	// Cap before validating: a caller who pastes a whole changelog into q should get
-	// a search for the first 200 characters, not a rejection. The cap is also what
-	// bounds the work the trigram index is asked to do.
-	if utf8.RuneCountInString(q) > searchQueryMaxRunes {
-		q = string([]rune(q)[:searchQueryMaxRunes])
-	}
+	// a search for the first 200 bytes, not a rejection. The cap is also what bounds
+	// the work the trigram index is asked to do.
+	q := capSearchQuery(strings.TrimSpace(r.URL.Query().Get("q")))
 	if utf8.RuneCountInString(q) < searchQueryMinRunes {
-		WriteProblem(w, r, InvalidRequest(r,
+		WriteProblem(w, r, InvalidParameter(r,
 			"The 'q' parameter must be at least 2 characters. A shorter query matches most of the catalogue and answers nothing."))
 		return
 	}
 
 	limit, err := parseLimit(r, searchLimitDefault, searchLimitMax)
 	if err != nil {
-		WriteProblem(w, r, InvalidRequest(r, err.Error()))
+		WriteProblem(w, r, InvalidParameter(r, err.Error()))
 		return
 	}
 
-	results, err := s.summaries.Search(ctx, q, limit)
+	// The use case bounds the query, runs the search and records the analytics events
+	// -- including the zero-result event, which is the most valuable signal FirmScout
+	// collects because it is a product request in disguise.
+	results, err := s.searchProducts.Execute(r.Context(), application.SearchQuery{Text: q, Limit: limit})
 	if err != nil {
-		WriteProblem(w, r, Internal(r, err))
+		s.writeQueryError(w, r, err)
 		return
 	}
+	s.writeJSON(w, r, http.StatusOK, PresentSearchResults(results.Results, results.Query))
+}
 
-	// Analytics: what people search for, and -- more useful -- what they search for
-	// and do not find, which is the backlog of products worth adding.
-	now := s.now()
-	events := []domain.Event{
-		domain.NewEvent(domain.EventSearchExecuted, now, "search", "").
-			With("query", q).
-			With("result_count", strconv.Itoa(len(results))).
-			With("limit", strconv.Itoa(limit)),
+// capSearchQuery truncates q to the longest prefix SearchProducts.Execute will accept
+// without truncating it further, cutting only on a rune boundary. See searchQueryMaxBytes.
+func capSearchQuery(q string) string {
+	if len(q) <= searchQueryMaxBytes {
+		return q
 	}
-	if len(results) == 0 {
-		events = append(events, domain.NewEvent(domain.EventSearchReturnedNoResult, now, "search", "").
-			With("query", q))
+	cut := searchQueryMaxBytes
+	for cut > 0 && !utf8.RuneStart(q[cut]) {
+		cut--
 	}
-	s.publish(events...)
-
-	s.writeJSON(w, r, http.StatusOK, PresentSearchResults(results, q))
+	return q[:cut]
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +138,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListVendors(w http.ResponseWriter, r *http.Request) {
 	limit, err := parseLimit(r, vendorLimitDefault, vendorLimitMax)
 	if err != nil {
-		WriteProblem(w, r, InvalidRequest(r, err.Error()))
+		WriteProblem(w, r, InvalidParameter(r, err.Error()))
 		return
 	}
 	cursor := r.URL.Query().Get("cursor")
@@ -131,10 +154,16 @@ func (s *Server) handleListVendors(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetVendor(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	if !domain.ValidSlug(slug) {
-		WriteProblem(w, r, InvalidRequest(r, "The vendor slug must be lowercase kebab-case."))
+		WriteProblem(w, r, InvalidParameter(r, "The vendor slug must be lowercase kebab-case."))
 		return
 	}
-	vendor, err := s.vendors.GetBySlug(r.Context(), slug)
+	// Through the use case rather than straight to the repository, for the same reason
+	// handleGetProduct is: GetVendor publishes domain.EventVendorViewed, and this is the
+	// only endpoint that can publish it. While this handler called VendorRepository
+	// directly the use case had no callers at all, so the one signal FirmScout has about
+	// which vendors readers open was never emitted -- a hole no test could see, because
+	// a use case nobody calls still compiles and still passes its own unit tests.
+	vendor, err := s.getVendor.Execute(r.Context(), slug)
 	if errors.Is(err, domain.ErrNotFound) {
 		WriteProblem(w, r, NotFound(r, "No vendor with that slug was found."))
 		return
@@ -151,12 +180,23 @@ func (s *Server) handleGetVendor(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (s *Server) handleGetProduct(w http.ResponseWriter, r *http.Request) {
-	summary, ok := s.lookupProduct(w, r)
-	if !ok {
+	slug := r.PathValue("slug")
+	if !domain.ValidSlug(slug) {
+		WriteProblem(w, r, InvalidParameter(r, "The product slug must be lowercase kebab-case."))
 		return
 	}
-	s.publish(domain.NewEvent(domain.EventProductViewed, s.now(), "product", summary.ProductID).
-		WithProduct(summary.VendorSlug, summary.ProductSlug))
+	// The use case reads the summary and records the product view. The event is not
+	// emitted here as well: two publishers of one fact is how a funnel ends up
+	// double-counting whichever path is busier.
+	summary, err := s.getProduct.Execute(r.Context(), slug)
+	if errors.Is(err, domain.ErrNotFound) {
+		WriteProblem(w, r, NotFound(r, "No product with that slug was found."))
+		return
+	}
+	if err != nil {
+		WriteProblem(w, r, Internal(r, err))
+		return
+	}
 	s.writeJSON(w, r, http.StatusOK, PresentProduct(summary))
 }
 
@@ -169,17 +209,17 @@ func (s *Server) handleListReleases(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := parseLimit(r, releaseLimitDefault, releaseLimitMax)
 	if err != nil {
-		WriteProblem(w, r, InvalidRequest(r, err.Error()))
+		WriteProblem(w, r, InvalidParameter(r, err.Error()))
 		return
 	}
 	channel := strings.TrimSpace(query.Get("channel"))
 	if channel != "" && !validChannels[channel] {
-		WriteProblem(w, r, InvalidRequest(r, "Unrecognised 'channel' value. Valid values are stable, long_term, testing and development."))
+		WriteProblem(w, r, InvalidParameter(r, "Unrecognised 'channel' value. Valid values are stable, long_term, testing and development."))
 		return
 	}
 	releaseType := strings.TrimSpace(query.Get("releaseType"))
 	if releaseType != "" && !domain.ValidReleaseType(domain.ReleaseType(releaseType)) {
-		WriteProblem(w, r, InvalidRequest(r, "Unrecognised 'releaseType' value."))
+		WriteProblem(w, r, InvalidParameter(r, "Unrecognised 'releaseType' value."))
 		return
 	}
 	sortKey := query.Get("sort")
@@ -189,7 +229,7 @@ func (s *Server) handleListReleases(w http.ResponseWriter, r *http.Request) {
 	if sortKey != sortReleaseDate && sortKey != sortFirstObserved {
 		// Named explicitly so a caller who tried sort=version reads why, rather than
 		// concluding the parameter is merely unsupported yet.
-		WriteProblem(w, r, InvalidRequest(r,
+		WriteProblem(w, r, InvalidParameter(r,
 			"Unrecognised 'sort' value. Only releaseDate and firstObservedAt are sortable; version strings are opaque tokens with no defined ordering and are deliberately not a sort key."))
 		return
 	}
@@ -198,57 +238,108 @@ func (s *Server) handleListReleases(w http.ResponseWriter, r *http.Request) {
 		order = orderDescending
 	}
 	if order != orderAscending && order != orderDescending {
-		WriteProblem(w, r, InvalidRequest(r, "Unrecognised 'order' value. Use asc or desc."))
+		WriteProblem(w, r, InvalidParameter(r, "Unrecognised 'order' value. Use asc or desc."))
 		return
 	}
 
-	releases, next, err := s.releases.ListForProduct(r.Context(), summary.ProductID, limit, query.Get("cursor"))
+	// History depth is a tier boundary (api.md §2). The window is the use case's
+	// decision, not this handler's: it reads the caller's plan, applies the boundary
+	// through the query rather than by filtering the page the query returned, and
+	// reports both the boundary and whether one was applied at all.
+	plan := CallerFromContext(r.Context()).Plan()
+	page, err := s.listReleases.Execute(r.Context(), application.ReleaseHistoryQuery{
+		Slug:   summary.ProductSlug,
+		Limit:  limit,
+		Cursor: query.Get("cursor"),
+		Plan:   plan,
+	})
 	if err != nil {
 		s.writeRepoError(w, r, err, "cursor")
 		return
 	}
 
-	releases = filterReleases(releases, channel, releaseType)
+	releases := filterReleases(page.Releases, channel, releaseType)
 	orderReleases(releases, sortKey, order)
 
 	ref := &ProductRef{Slug: summary.ProductSlug, Name: summary.ProductName}
-	s.writeJSON(w, r, http.StatusOK, PresentReleases(releases, ref, next))
+	window := PresentHistoryWindow(plan, page.Since, latestOutsideWindow(summary, page.Since))
+	s.writeJSON(w, r, http.StatusOK, PresentReleases(releases, ref, page.NextCursor, window))
 }
 
+// handleGetLatest answers "what version should I be on?".
+//
+// # Why this endpoint is not windowed
+//
+// A caller's plan bounds how much *history* they receive (api.md §2), and the newest
+// observed release is not history: it is the current answer, and it is the answer the
+// public website -- an anonymous caller of this same API -- exists to show. Windowing
+// it would make FirmScout report "this product has no published release" for a product
+// that plainly has one, whenever the vendor last shipped more than twelve months ago,
+// which is the normal state of the discontinued hardware this catalogue tracks. That is
+// a false statement in a product whose only asset is being right, and api.md §1 already
+// puts the paywall on endpoints, volume and history depth -- never on the current fact.
+//
+// The consequence is that an anonymous caller can see a latest release here and an empty
+// page from /releases. That is not left to be discovered: the history response's window
+// member says so out loud (see latestOutsideWindow).
 func (s *Server) handleGetLatest(w http.ResponseWriter, r *http.Request) {
-	summary, ok := s.lookupProduct(w, r)
-	if !ok {
+	slug := r.PathValue("slug")
+	if !domain.ValidSlug(slug) {
+		WriteProblem(w, r, InvalidParameter(r, "The product slug must be lowercase kebab-case."))
 		return
 	}
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 	if channel != "" && !validChannels[channel] {
-		WriteProblem(w, r, InvalidRequest(r, "Unrecognised 'channel' value. Valid values are stable, long_term, testing and development."))
+		WriteProblem(w, r, InvalidParameter(r, "Unrecognised 'channel' value. Valid values are stable, long_term, testing and development."))
 		return
 	}
 
-	release, err := s.releases.LatestForProduct(r.Context(), summary.ProductID, channel)
-	if errors.Is(err, domain.ErrNotFound) {
-		WriteProblem(w, r, NotFound(r, "This product has no published release on that channel."))
-		return
-	}
+	result, err := s.getLatest.Execute(r.Context(), slug, channel)
 	if err != nil {
-		WriteProblem(w, r, Internal(r, err))
+		// Both failures are ErrNotFound and they are different answers, so they are
+		// told apart by what the use case had already resolved when it gave up: a
+		// summary means the product exists and this channel has no release.
+		switch {
+		case errors.Is(err, domain.ErrNotFound) && result.Summary.ProductSlug == "":
+			WriteProblem(w, r, NotFound(r, "No product with that slug was found."))
+		// "on that channel" is only honest when the caller named one. An omitted
+		// ?channel means ANY channel (see application.ReleaseRepository.LatestForProduct),
+		// so blaming a channel the caller never mentioned sends them looking for a
+		// filter to remove -- which is exactly the wrong diagnosis, and exactly what
+		// this endpoint said while it was answering 404 to its own default call.
+		case errors.Is(err, domain.ErrNotFound) && channel == "":
+			WriteProblem(w, r, NotFound(r, "This product has no published release."))
+		case errors.Is(err, domain.ErrNotFound):
+			WriteProblem(w, r, NotFound(r, "This product has no published release on that channel."))
+		// The use case now rejects a malformed slug itself. This handler validates the
+		// slug before calling, so the branch is unreachable through HTTP today -- it is
+		// here so that it stays unreachable for the right reason. Without it, a
+		// validation error would fall into default and be answered 500, which would turn
+		// the removal of the pre-check into an availability bug instead of a 400.
+		case errors.Is(err, domain.ErrValidation):
+			WriteProblem(w, r, InvalidParameter(r, "The product slug must be lowercase kebab-case.").WithCause(err))
+		default:
+			WriteProblem(w, r, Internal(r, err))
+		}
 		return
 	}
 
-	s.writeJSON(w, r, http.StatusOK, LatestReleaseResponse{
-		Vendor:        VendorRef{Slug: summary.VendorSlug, Name: summary.VendorName},
-		Product:       ProductRef{Slug: summary.ProductSlug, Name: summary.ProductName},
-		LatestRelease: PresentRelease(release, nil),
-	})
+	s.writeJSON(w, r, http.StatusOK, PresentLatestRelease(result))
 }
 
 // lookupProduct resolves the {slug} path value to a product summary, writing the
 // problem document itself when it cannot. ok is false when a response has been sent.
+//
+// The release history endpoint still needs this even though it goes through a use case,
+// because ReleaseHistory carries the product id and not the product's name, and every
+// release in the response is rendered with a {slug, name} reference. The report for this
+// phase asks for the summary to be returned from ListReleases so the second read goes
+// away; until then the second read is one indexed row against a projection, and inventing
+// the name here or dropping it from the response are both worse.
 func (s *Server) lookupProduct(w http.ResponseWriter, r *http.Request) (application.ProductSummary, bool) {
 	slug := r.PathValue("slug")
 	if !domain.ValidSlug(slug) {
-		WriteProblem(w, r, InvalidRequest(r, "The product slug must be lowercase kebab-case."))
+		WriteProblem(w, r, InvalidParameter(r, "The product slug must be lowercase kebab-case."))
 		return application.ProductSummary{}, false
 	}
 	summary, err := s.summaries.Get(r.Context(), slug)
@@ -263,6 +354,35 @@ func (s *Server) lookupProduct(w http.ResponseWriter, r *http.Request) (applicat
 	return summary, true
 }
 
+// latestOutsideWindow reports that the product's newest observed release cannot appear
+// in this windowed page at all, which is what makes an empty history page and a
+// populated /latest response readable as one consistent story instead of two endpoints
+// contradicting each other.
+//
+// It claims "outside" only when the vendor's own date puts it outside at *every*
+// precision that date could denote: a release the vendor dated "2025" may have shipped
+// in December, so it is not outside a window opening in September 2025, and saying it
+// was would assert a day the vendor never published (ADR-0017).
+//
+// The flag and the page must agree, and the only way to guarantee that is to ask the
+// same question the query asks, in the same units. The query's predicate is a date
+// comparison in UTC -- the stored precision's period end against the boundary reduced to
+// a UTC calendar day (postgres.ListForProduct) -- so this reduces the boundary the same
+// way rather than comparing against the raw instant. Comparing PeriodEnd, which is a UTC
+// midnight, against an instant carrying a time of day would put this flag and the page
+// on different sides of the boundary for a release dated on the boundary day itself: the
+// query would return the release while the response asserted it could not appear.
+//
+// An undated release is never claimed either: the window falls back to first-observed
+// time for those (application.ReleaseListOptions.Since), which the summary does not
+// carry, and a guess is worth less than an absent flag.
+func latestOutsideWindow(summary application.ProductSummary, since time.Time) bool {
+	if since.IsZero() || summary.LatestReleaseID == "" || !summary.LatestReleaseDate.Known() {
+		return false
+	}
+	return summary.LatestReleaseDate.PeriodEnd().Before(application.UTCDayOf(since))
+}
+
 // ---------------------------------------------------------------------------
 // releases
 // ---------------------------------------------------------------------------
@@ -270,7 +390,7 @@ func (s *Server) lookupProduct(w http.ResponseWriter, r *http.Request) (applicat
 func (s *Server) handleGetRelease(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !releaseIDPattern.MatchString(id) {
-		WriteProblem(w, r, InvalidRequest(r, "The release id must look like rel_<identifier>."))
+		WriteProblem(w, r, InvalidParameter(r, "The release id must look like rel_<identifier>."))
 		return
 	}
 	release, err := s.releases.GetByID(r.Context(), id)
@@ -282,13 +402,55 @@ func (s *Server) handleGetRelease(w http.ResponseWriter, r *http.Request) {
 		WriteProblem(w, r, Internal(r, err))
 		return
 	}
-	s.writeJSON(w, r, http.StatusOK, PresentRelease(release, nil))
+	// Unlike a product's own history or latest release, this request path carries no
+	// product context to build a ProductRef from directly -- it has to be resolved
+	// from the release id. Only domain.ErrNotFound renders the release with product
+	// omitted (PresentRelease's documented "could not resolve" case): Insert's own
+	// invariant ("a release with no mapping is unreachable") means that specific case
+	// should not occur in practice, but a mapping genuinely deleted out from under a
+	// release is at least an honest "we don't know" rather than a fabricated answer.
+	//
+	// Any OTHER error -- a pool exhausted, a context deadline, an ordinary transient
+	// failure on this now-mandatory second round trip -- must not be treated the same
+	// way. Omitting product because a database call happened to fail would serve a 200
+	// whose missing key means "no mapping exists" when it actually means "we could not
+	// look", reproducing exactly the crash class this endpoint exists to have closed.
+	// Fail loudly instead, the same way the GetByID lookup three lines above already
+	// does. (openapi.yaml no longer lists product as required on Release, because this
+	// very branch and /latest both legitimately omit it -- which changes nothing here:
+	// an honest omission is a documented state, and a swallowed error is not.)
+	var product *ProductRef
+	switch ref, perr := s.releases.ProductRefForRelease(r.Context(), id); {
+	case perr == nil:
+		product = &ProductRef{Slug: ref.Slug, Name: ref.Name}
+	case errors.Is(perr, domain.ErrNotFound):
+		// product stays nil: an honest "could not resolve", not a fabricated ref.
+	default:
+		WriteProblem(w, r, Internal(r, perr))
+		return
+	}
+	s.writeJSON(w, r, http.StatusOK, PresentRelease(release, product))
 }
 
-// filterReleases applies the exact-match filters. It is a filter over the page the
-// repository returned; pushing the predicate into the query is the persistence
-// adapter's job, and doing it here as well keeps the endpoint's contract true
-// regardless of which adapter is underneath.
+// filterReleases applies the exact-match filters to the page the query returned.
+//
+// # The consequence, which the contract now states rather than hides
+//
+// The page is fetched and its next cursor minted before this runs, so a filtered query
+// can return an empty page together with a non-null nextCursor -- there were rows, and
+// none of them matched. A client that stops on an empty page therefore concludes there
+// are no matching releases when there may be many, so openapi.yaml and api.md §2 say
+// explicitly that a filtered page may be empty while nextCursor is non-null and that a
+// client must page until nextCursor is null. Until this phase they said the opposite by
+// implication, having promised that "the window is applied by the query, not by
+// filtering a returned page, so cursors stay meaningful" -- true of the window, and a
+// consumer would read it as a property of the endpoint.
+//
+// The real fix is to push channel and releaseType into the query beside Since, which
+// needs two fields on application.ReleaseListOptions and a WHERE clause in a repository
+// this owner does not hold; it is requested in this phase's report. Documenting the
+// behaviour is the honest interim, because the alternative -- leaving a claim in the
+// contract that the code does not honour -- is the failure mode, not the filter.
 func filterReleases(rs []domain.Release, channel, releaseType string) []domain.Release {
 	if channel == "" && releaseType == "" {
 		return rs
@@ -307,6 +469,17 @@ func filterReleases(rs []domain.Release, channel, releaseType string) []domain.R
 }
 
 // orderReleases sorts a page of releases.
+//
+// # It sorts the page, not the history
+//
+// The query orders by first_observed_at DESC, id DESC -- the pair the cursor is built
+// from, because a page order that differs from the cursor order cannot paginate -- and
+// this runs afterwards, over the rows already fetched. So `sort` and `order` reorder
+// each page internally and do not change which rows land on which page: asking for
+// `order=asc` returns the newest page first, ascending within itself. That is stated in
+// api.md §2 and in openapi.yaml rather than left for a consumer to discover, and the
+// real fix is a query that orders by the requested key with a cursor built from it,
+// which is a repository change and not a handler one.
 //
 // # Why this is not a sort by version
 //
@@ -423,6 +596,24 @@ func parseLimit(r *http.Request, def, max int) (int, error) {
 	return n, nil
 }
 
+// writeQueryError maps a read use case's failure to a problem document.
+//
+// It is the fallback for a use case whose failures the handler cannot describe more
+// precisely than the catalogue in api.md §6 does. A handler that can say something
+// better -- "no product with that slug", "no release on that channel" -- says it
+// itself, because a caller reading "the requested resource does not exist" on a URL
+// with two resources in it learns nothing.
+func (s *Server) writeQueryError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		WriteProblem(w, r, NotFound(r, "The requested resource does not exist."))
+	case errors.Is(err, domain.ErrValidation):
+		WriteProblem(w, r, InvalidParameter(r, "A parameter is not one this endpoint accepts.").WithCause(err))
+	default:
+		WriteProblem(w, r, Internal(r, err))
+	}
+}
+
 // writeRepoError maps a repository failure to a problem document. A malformed cursor
 // is the caller's mistake, so it is a 400 naming the parameter rather than a 500.
 func (s *Server) writeRepoError(w http.ResponseWriter, r *http.Request, err error, param string) {
@@ -430,7 +621,7 @@ func (s *Server) writeRepoError(w http.ResponseWriter, r *http.Request, err erro
 	case errors.Is(err, domain.ErrNotFound):
 		WriteProblem(w, r, NotFound(r, "The requested resource does not exist."))
 	case errors.Is(err, domain.ErrValidation):
-		WriteProblem(w, r, InvalidRequest(r, "The '"+param+"' parameter is not a cursor this API issued.").WithCause(err))
+		WriteProblem(w, r, InvalidParameter(r, "The '"+param+"' parameter is not a cursor this API issued.").WithCause(err))
 	default:
 		WriteProblem(w, r, Internal(r, err))
 	}

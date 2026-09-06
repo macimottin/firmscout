@@ -300,6 +300,16 @@ type productDoc struct {
 			Kind       string `yaml:"kind"`
 			SourceNote string `yaml:"source_note"`
 		} `yaml:"aliases"`
+		// Runs names the products this one runs, most usefully the operating system a
+		// hardware model runs. It is deliberately a list of slugs rather than of ids:
+		// a registry file is written by a human against the identifiers a human can
+		// see, and the sync resolves them once every product has been upserted, so a
+		// device may name an operating system declared in any other file.
+		Runs []struct {
+			Product    string `yaml:"product"`
+			Kind       string `yaml:"kind"`
+			SourceNote string `yaml:"source_note"`
+		} `yaml:"runs"`
 	} `yaml:"spec"`
 }
 
@@ -312,7 +322,13 @@ func parseProduct(p string, raw []byte) (application.RegistryDocument, error) {
 		return application.RegistryDocument{}, fmt.Errorf("%s: metadata.vendor is required", p)
 	}
 
-	lifecycle := domain.LifecycleStatus(orDefault(d.Spec.LifecycleStatus, string(domain.LifecycleActive)))
+	// Default to LifecycleUnknown, not LifecycleActive: this field's whole point is
+	// that most vendors publish no firmware-lifecycle statement at all (see
+	// hap-ax3.yaml's provenance comment), so an omitted line is an absence of
+	// evidence, not evidence the device is active. Defaulting to "active" would
+	// let a contributor's missing line silently assert the one claim no page
+	// actually supports.
+	lifecycle := domain.LifecycleStatus(orDefault(d.Spec.LifecycleStatus, string(domain.LifecycleUnknown)))
 	if !domain.ValidLifecycleStatus(lifecycle) {
 		return application.RegistryDocument{}, fmt.Errorf(
 			"%s: lifecycle_status %q is not a known status", p, d.Spec.LifecycleStatus)
@@ -354,7 +370,37 @@ func parseProduct(p string, raw []byte) (application.RegistryDocument, error) {
 		aliases = append(aliases, alias)
 	}
 
-	return application.RegistryDocument{Path: p, Product: &prod, Aliases: aliases}, nil
+	// The relationship's ToProductID holds the target's registry SLUG here, not an id,
+	// exactly as metadata.family holds a family slug and metadata.vendor a vendor slug.
+	// The loader cannot resolve it: a file is parsed on its own, and the product it
+	// points at may be declared in a file this loader has not read yet. What the loader
+	// can do -- and does, because a typo caught at parse time names the file it is in --
+	// is reject a target that is not even shaped like a slug.
+	rels := make([]domain.ProductRelationship, 0, len(d.Spec.Runs))
+	for _, r := range d.Spec.Runs {
+		kind := domain.RelationKind(orDefault(r.Kind, string(domain.RelationRunsOS)))
+		if !domain.ValidRelationKind(kind) {
+			return application.RegistryDocument{}, fmt.Errorf(
+				"%s: runs.kind %q is not a known relation kind", p, r.Kind)
+		}
+		if !domain.ValidSlug(r.Product) {
+			return application.RegistryDocument{}, fmt.Errorf(
+				"%s: runs.product %q must be a product slug", p, r.Product)
+		}
+		rels = append(rels, domain.ProductRelationship{
+			ToProductID: r.Product, // resolved to an id by the sync use case
+			Kind:        kind,
+			SourceNote:  r.SourceNote,
+			ManagedBy:   domain.ManagedByRegistry,
+		})
+	}
+
+	return application.RegistryDocument{
+		Path:          p,
+		Product:       &prod,
+		Aliases:       aliases,
+		Relationships: rels,
+	}, nil
 }
 
 type sourceDoc struct {

@@ -1,8 +1,8 @@
 // Package collectors implements FirmScout's configuration-driven collector engines.
 //
 // A collector config is a declarative YAML document (collectors/config/<vendor>/*.yaml)
-// interpreted by a fixed engine -- html_selectors or text_regex in the MVP -- into the
-// application.Collector contract. The specification is
+// interpreted by a fixed engine -- html_selectors, text_regex or rss_atom in the MVP --
+// into the application.Collector contract. The specification is
 // docs/architecture/collector-config-spec.md; this package is its implementation.
 //
 // The security model the whole arrangement rests on is that a config is data, not
@@ -53,13 +53,16 @@ type Engine string
 const (
 	EngineHTMLSelectors Engine = "html_selectors"
 	EngineTextRegex     Engine = "text_regex"
+	// EngineRSSAtom reads a parsed RSS 2.0 or Atom feed. See rss_atom.go for the
+	// engine and the closed feed-field selector vocabulary it accepts.
+	EngineRSSAtom Engine = "rss_atom"
 )
 
 // roadmapEngines are reserved names from collector-config-spec.md §4.3. They are named
 // here so that a config declaring one gets "not implemented yet" rather than the same
 // message as a typo -- those are different problems for the person reading the error.
 var roadmapEngines = map[Engine]bool{
-	"json_path": true, "rss_atom": true, "xml_xpath": true,
+	"json_path": true, "xml_xpath": true,
 	"pdf_text": true, "github_releases": true,
 }
 
@@ -578,14 +581,14 @@ func (c *Config) validate() error {
 	}
 
 	switch c.Spec.Engine {
-	case EngineHTMLSelectors, EngineTextRegex:
+	case EngineHTMLSelectors, EngineTextRegex, EngineRSSAtom:
 	case "":
-		return fieldErr("spec.engine", "must be set (%s or %s)", EngineHTMLSelectors, EngineTextRegex)
+		return fieldErr("spec.engine", "must be set (%s, %s or %s)", EngineHTMLSelectors, EngineTextRegex, EngineRSSAtom)
 	default:
 		if roadmapEngines[c.Spec.Engine] {
 			return fieldErr("spec.engine", "%q is a reserved roadmap engine that the MVP loader does not implement", c.Spec.Engine)
 		}
-		return fieldErr("spec.engine", "%q is not a known engine (expected %s or %s)", c.Spec.Engine, EngineHTMLSelectors, EngineTextRegex)
+		return fieldErr("spec.engine", "%q is not a known engine (expected %s, %s or %s)", c.Spec.Engine, EngineHTMLSelectors, EngineTextRegex, EngineRSSAtom)
 	}
 
 	if err := c.validateProductMatch(); err != nil {
@@ -669,6 +672,14 @@ func (c *Config) validateNormalize() error {
 	}
 	for i := range n.Replace {
 		r := &n.Replace[i]
+		if c.Spec.Engine == EngineRSSAtom {
+			// rewriting XML with a regex before parsing it is how a selector starts
+			// matching something its author never wrote -- the same reasoning
+			// section_selector and strip are refused for above, restated here
+			// because replace has no engine restriction for the other two engines.
+			return fieldErr(fmt.Sprintf("spec.normalize.replace[%d]", i),
+				"is not supported for the %s engine: it would rewrite XML with a regex before parsing it", EngineRSSAtom)
+		}
 		if strings.TrimSpace(r.Pattern) == "" {
 			return fieldErr(fmt.Sprintf("spec.normalize.replace[%d].pattern", i), "must be set")
 		}
@@ -684,22 +695,40 @@ func (c *Config) validateNormalize() error {
 func (c *Config) validateExtract() error {
 	e := &c.Spec.Extract
 
-	if strings.TrimSpace(e.ReleaseContainer) == "" {
-		return fieldErr("spec.extract.release_container", "must be set: it identifies each repeating unit that becomes one candidate")
-	}
-	switch c.Spec.Engine {
-	case EngineHTMLSelectors:
-		sel, err := compileSelector(e.ReleaseContainer)
-		if err != nil {
-			return fieldErr("spec.extract.release_container", "%v", err)
+	if c.Spec.Engine == EngineRSSAtom {
+		// Unlike the other two engines, the container here is a feed entry, not a
+		// selector, so the key defaults rather than being required (D15,
+		// collector-config-spec.md §4.4). It stays required-with-a-default rather
+		// than being silently ignored: a config that says "item" and is handed an
+		// Atom feed extracts nothing and warns, which is a repair signal, not
+		// something to paper over.
+		if strings.TrimSpace(e.ReleaseContainer) == "" {
+			e.ReleaseContainer = FeedContainerAuto
 		}
-		e.containerSel = sel
-	case EngineTextRegex:
-		re, err := regexp.Compile(e.ReleaseContainer)
-		if err != nil {
-			return fieldErr("spec.extract.release_container", "invalid RE2 pattern: %v", err)
+		switch e.ReleaseContainer {
+		case FeedContainerAuto, FeedContainerItem, FeedContainerEntry:
+		default:
+			return fieldErr("spec.extract.release_container",
+				"%q is not one of %s, %s or %s", e.ReleaseContainer, FeedContainerAuto, FeedContainerItem, FeedContainerEntry)
 		}
-		e.containerRe = re
+	} else {
+		if strings.TrimSpace(e.ReleaseContainer) == "" {
+			return fieldErr("spec.extract.release_container", "must be set: it identifies each repeating unit that becomes one candidate")
+		}
+		switch c.Spec.Engine {
+		case EngineHTMLSelectors:
+			sel, err := compileSelector(e.ReleaseContainer)
+			if err != nil {
+				return fieldErr("spec.extract.release_container", "%v", err)
+			}
+			e.containerSel = sel
+		case EngineTextRegex:
+			re, err := regexp.Compile(e.ReleaseContainer)
+			if err != nil {
+				return fieldErr("spec.extract.release_container", "invalid RE2 pattern: %v", err)
+			}
+			e.containerRe = re
+		}
 	}
 
 	if strings.TrimSpace(e.ReleaseType) == "" {
@@ -753,6 +782,17 @@ func (c *Config) validateExtract() error {
 			return fieldErr("spec.extract.evidence_excerpt",
 				"%q is neither %q nor a named capture group of spec.extract.release_container", e.EvidenceExcerpt, ScopeSelector)
 		}
+		e.excerptGroup = e.EvidenceExcerpt
+	case c.Spec.Engine == EngineRSSAtom:
+		if !feedFieldNames[e.EvidenceExcerpt] {
+			return fieldErr("spec.extract.evidence_excerpt",
+				"%q is neither %q nor one of the rss_atom feed fields (%s)",
+				e.EvidenceExcerpt, ScopeSelector, strings.Join(sortedFeedFieldNames(), ", "))
+		}
+		// Reusing excerptGroup rather than adding a parallel field: both text_regex
+		// and rss_atom are "look this named thing up on the container", and giving
+		// that idea two field names across two engines would be the drift this
+		// package otherwise avoids.
 		e.excerptGroup = e.EvidenceExcerpt
 	}
 
@@ -810,6 +850,14 @@ func (c *Config) validateField(name string, f *FieldSpec) error {
 			return fieldErr(fieldPath+".selector",
 				"%q is neither %q nor a named capture group of spec.extract.release_container", f.Selector, ScopeSelector)
 		}
+	case c.Spec.Engine == EngineRSSAtom:
+		// The vocabulary is closed (collector-config-spec.md §4.4): a selector
+		// outside it would silently match nothing, forever, on every check.
+		if !feedFieldNames[f.Selector] {
+			return fieldErr(fieldPath+".selector",
+				"%q is not one of the rss_atom feed fields (%s) or %q",
+				f.Selector, strings.Join(sortedFeedFieldNames(), ", "), ScopeSelector)
+		}
 	}
 
 	if f.Attribute != "" && c.Spec.Engine != EngineHTMLSelectors {
@@ -839,6 +887,17 @@ func (c *Config) validateField(name string, f *FieldSpec) error {
 // validateDateField implements collector-config-spec.md §6: the declared precision
 // must match what the paired layout can actually determine, checked at load time,
 // before any source is ever fetched with this config.
+//
+// A layout carrying a zone offset is accepted at every precision, month_only and
+// year_only included, and that is a decision rather than an oversight. parseDate reads
+// the calendar components in the offset the source published them in, so "Jan 2006
+// -0700" applied to "Aug 2026 +0200" determines August 2026 exactly as unambiguously as
+// a zoneless layout does; there is nothing left for this function to refuse. The
+// alternative considered was rejecting such a pairing here, and it was dropped because
+// it would forbid a well-defined config for no gain while leaving the exact_day path --
+// which must accept offsets, every RFC 1123 feed carries one -- under a different rule
+// from its neighbours. Anyone changing parseDate's zone handling must change this
+// comment and this validation with it: the two agree deliberately, not by accident.
 func (c *Config) validateDateField(fieldPath, name string, f *FieldSpec) error {
 	if !isDateField(name) {
 		if f.Precision != "" {

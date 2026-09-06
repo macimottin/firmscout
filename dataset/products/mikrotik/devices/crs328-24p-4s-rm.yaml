@@ -1,0 +1,74 @@
+# =============================================================================
+# Device: MikroTik CRS328-24P-4S+RM
+# =============================================================================
+# The model in the fleet example that motivated this phase. A hardware model,
+# registered as a Product with model_identifier set and no release stream of its
+# own. See ADR-0024, and see hap-ax3.yaml for the standing note on what a device
+# document does and does not claim.
+#
+# Provenance:
+#   GET https://mikrotik.com/product/crs328_24p_4s_rm
+#     fetched 2026-09-06T01:18:56Z, HTTP 200, 368434 bytes.
+#
+# Verbatim excerpts, whitespace-collapsed:
+#   name             <h1 class="font-bold mtk-h4 md:mtk-h3 lg:mtk-h1">CRS328-24P-4S+RM
+#   model_identifier Product code </span> <span class="basis-1/2 font-light
+#                    break-words"> CRS328-24P-4S+RM
+#   family           Architecture </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> ARM 32bit
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   runs             Operating System </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]-->
+#                    RouterOS / SwitchOS <!--[if ENDBLOCK]><![endif]--> </span>
+#   category         breadcrumb: Home / Hardware / Switches
+#
+# Also measured and not recorded: Size of RAM 512 MB, Storage size 16 MB.
+#
+# The Operating System field names TWO systems, and the page links both
+# https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-arm.npk and
+# https://download.mikrotik.com/swos/2.18/swos-css328p-2.18.bin. Only the
+# RouterOS edge is recorded, because SwitchOS is not a registered product in
+# this registry and pointing at a slug that does not exist would fail the sync.
+# The SwitchOS edge is ABSENT rather than approximated; adding it means
+# registering SwitchOS as a product first, with its own evidence.
+#
+# Note that model_identifier, the marketing name and the slug's source string
+# are all the same here, unlike hAP ax³. The alias is still declared explicitly
+# rather than left implicit in the product name, because model-number search
+# runs through aliases_text and a device whose code happens to equal its name
+# must not depend on that coincidence.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: mikrotik-crs328-24p-4s-rm
+  vendor: mikrotik
+  family: arm-32bit
+
+spec:
+  name: CRS328-24P-4S+RM
+  model_identifier: CRS328-24P-4S+RM
+  lifecycle_status: unknown
+
+  category_slugs:
+    - network-devices
+    - switches
+
+  aliases:
+    - alias: CRS328-24P-4S+RM
+      kind: model_number
+      source_note: >-
+        The "Product code" specification on
+        https://mikrotik.com/product/crs328_24p_4s_rm, fetched
+        2026-09-06T01:18:56Z.
+
+  runs:
+    - product: mikrotik-routeros
+      kind: runs_os
+      source_note: >-
+        https://mikrotik.com/product/crs328_24p_4s_rm, fetched
+        2026-09-06T01:18:56Z: Operating System "RouterOS / SwitchOS". The same
+        page links the device-resolved image
+        https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-arm.npk

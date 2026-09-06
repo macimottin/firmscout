@@ -1,0 +1,38 @@
+{
+  "collectorId": "test.atom-basic",
+  "note": "SYNTHETIC. Exercises Atom: link/@href resolution (skipping the rel=self link), a month-only \u003cpublished\u003e date, and the D14 rule that pub_date never falls back to \u003cupdated\u003e -- the second entry carries only \u003cupdated\u003e and must come back with an unknown release date.",
+  "warningsContain": [
+    "field \"release_date\" produced no value; release date recorded as unknown"
+  ],
+  "candidates": [
+    {
+      "rawVersion": "7.30",
+      "normalizedVersion": "7.30",
+      "releaseDate": {
+        "precision": "month_only",
+        "value": "2026-03"
+      },
+      "releaseType": "embedded_os",
+      "channel": "",
+      "applicability": {
+        "productHint": "test-vendor-thing"
+      },
+      "evidenceExcerptContains": "Test Vendor Thing 7.30 released",
+      "confidenceAtLeast": 0.9
+    },
+    {
+      "rawVersion": "7.31",
+      "normalizedVersion": "7.31",
+      "releaseDate": {
+        "precision": "unknown"
+      },
+      "releaseType": "embedded_os",
+      "channel": "",
+      "applicability": {
+        "productHint": "test-vendor-thing"
+      },
+      "evidenceExcerptContains": "Test Vendor Thing 7.31 nightly build",
+      "confidenceAtLeast": 0.8
+    }
+  ]
+}

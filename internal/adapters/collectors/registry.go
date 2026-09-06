@@ -76,6 +76,8 @@ func NewRegistry(configs []Config, opts ...RegistryOption) (*Registry, error) {
 			c, err = NewHTMLSelectors(cfg, options.logger)
 		case EngineTextRegex:
 			c, err = NewTextRegex(cfg, options.logger)
+		case EngineRSSAtom:
+			c, err = NewRSSAtom(cfg, options.logger)
 		default:
 			err = fieldErr("spec.engine", "%q has no engine implementation", cfg.Spec.Engine)
 		}

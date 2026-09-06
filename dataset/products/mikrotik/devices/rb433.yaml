@@ -1,0 +1,69 @@
+# =============================================================================
+# Device: MikroTik RB433
+# =============================================================================
+# See ADR-0024 and hap-ax3.yaml for the standing note on device documents.
+#
+# Provenance:
+#   GET https://mikrotik.com/product/RB433
+#     fetched 2026-09-06T01:19:01Z, HTTP 200, 332656 bytes.
+#
+# Verbatim excerpts, whitespace-collapsed:
+#   name             <h1 class="font-bold mtk-h4 md:mtk-h3 lg:mtk-h1">RB433
+#   model_identifier Product code </span> <span class="basis-1/2 font-light
+#                    break-words"> RB433
+#   family           Architecture </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> MIPSBE
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   runs             Operating System </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> RouterOS
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   category         breadcrumb: Home / Hardware / RouterBOARD
+#
+# Also measured and not recorded: Size of RAM 64 MB, Storage size 64 MB.
+#
+# category_slugs carries only "network-devices". The vendor's own breadcrumb
+# group for this model is "RouterBOARD", which names a product line rather than
+# a device class, and FirmScout's vocabulary has no term for it. Inferring
+# "router" from the word "RouterBOARD" would be a device fact nobody published.
+#
+# This is a 2007-era model that the vendor's page badges "Discontinued", and it
+# is still offered RouterOS 7.24.2 built for mipsbe
+# (https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-mipsbe.npk)
+# plus the per-SoC RouterBOOT firmware
+# https://download.mikrotik.com/routeros/7.24.2/ar7100-7.24.2.fwf -- which is
+# why lifecycle_status is "unknown" rather than "eol", and why the .fwf is
+# noted here rather than modelled: a per-SoC bootloader image is a second
+# applicability axis the schema does not carry and this phase does not add.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: mikrotik-rb433
+  vendor: mikrotik
+  family: mipsbe
+
+spec:
+  name: RB433
+  model_identifier: RB433
+  lifecycle_status: unknown
+
+  category_slugs:
+    - network-devices
+
+  aliases:
+    - alias: RB433
+      kind: model_number
+      source_note: >-
+        The "Product code" specification on https://mikrotik.com/product/RB433,
+        fetched 2026-09-06T01:19:01Z.
+
+  runs:
+    - product: mikrotik-routeros
+      kind: runs_os
+      source_note: >-
+        https://mikrotik.com/product/RB433, fetched 2026-09-06T01:19:01Z:
+        Operating System "RouterOS". The same page links the device-resolved
+        image
+        https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-mipsbe.npk

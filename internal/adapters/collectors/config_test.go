@@ -263,6 +263,107 @@ spec:
 	}
 }
 
+// validRSSAtomConfig is the rss_atom baseline the tests below mutate, mirroring
+// validConfig's role for html_selectors above.
+const validRSSAtomConfig = `
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+metadata:
+  id: example.feed
+  vendor: mikrotik
+  version: 1
+spec:
+  engine: rss_atom
+  product_match:
+    product: mikrotik-routeros
+  extract:
+    fields:
+      version:
+        selector: title
+        regex: "([0-9]+\\.[0-9]+\\.[0-9]+)"
+        transform: trim
+      release_date:
+        selector: pub_date
+        date_format: "Mon, 02 Jan 2006 15:04:05 -0700"
+        precision: exact_day
+    release_type: embedded_os
+`
+
+// TestLoadConfigAcceptsAMinimalRSSAtomDocument checks the one default this engine adds
+// to the shared loader: release_container is optional and defaults to "auto" (D15),
+// unlike html_selectors and text_regex, where it is required.
+func TestLoadConfigAcceptsAMinimalRSSAtomDocument(t *testing.T) {
+	cfg, err := collectors.LoadConfig([]byte(validRSSAtomConfig))
+	if err != nil {
+		t.Fatalf("minimal rss_atom config rejected: %v", err)
+	}
+	if cfg.Spec.Extract.ReleaseContainer != collectors.FeedContainerAuto {
+		t.Errorf("release_container default: want %q, got %q", collectors.FeedContainerAuto, cfg.Spec.Extract.ReleaseContainer)
+	}
+}
+
+// TestRSSAtomConfigRejects is TestLoadConfigRejects's counterpart for this engine's own
+// validation branches (§6.1/§6.5): the closed container vocabulary, the rejected
+// attribute selector and the closed evidence_excerpt vocabulary. The feed-field
+// selector vocabulary and the html-only normalize keys are exercised end to end,
+// against a running collector, in rss_atom_test.go.
+func TestRSSAtomConfigRejects(t *testing.T) {
+	cases := []struct {
+		name        string
+		mutate      func(string) string
+		wantField   string
+		wantMessage string
+	}{
+		{
+			name: "release_container outside auto/item/entry",
+			mutate: func(s string) string {
+				return strings.Replace(s, "  extract:\n", "  extract:\n    release_container: paragraph\n", 1)
+			},
+			wantField:   "spec.extract.release_container",
+			wantMessage: "is not one of auto, item or entry",
+		},
+		{
+			name: "attribute is rejected",
+			mutate: replace(
+				"        selector: title\n        regex:",
+				"        selector: title\n        attribute: href\n        regex:",
+			),
+			wantField:   "spec.extract.fields.version.attribute",
+			wantMessage: "is only meaningful for the html_selectors engine",
+		},
+		{
+			name: "evidence_excerpt outside the feed-field vocabulary",
+			mutate: func(s string) string {
+				return strings.Replace(s, "    release_type: embedded_os", "    release_type: embedded_os\n    evidence_excerpt: summary", 1)
+			},
+			wantField:   "spec.extract.evidence_excerpt",
+			wantMessage: "is neither \":scope\" nor one of the rss_atom feed fields",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := tc.mutate(validRSSAtomConfig)
+			if mutated == validRSSAtomConfig {
+				t.Fatal("test mutation did not apply")
+			}
+			_, err := collectors.LoadConfig([]byte(mutated))
+			if err == nil {
+				t.Fatal("config was accepted but should have been rejected")
+			}
+			if !errors.Is(err, domain.ErrValidation) {
+				t.Errorf("error does not classify as a validation failure: %v", err)
+			}
+			if tc.wantField != "" && !strings.Contains(err.Error(), tc.wantField) {
+				t.Errorf("error does not name the offending field %q: %v", tc.wantField, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Errorf("error message %q does not contain %q", err.Error(), tc.wantMessage)
+			}
+		})
+	}
+}
+
 // TestLoadDirLoadsTheShippedConfigs is the check that keeps the checked-in configs
 // honest: they are loaded and validated by the same code production uses.
 func TestLoadDirLoadsTheShippedConfigs(t *testing.T) {

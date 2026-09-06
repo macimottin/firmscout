@@ -46,20 +46,28 @@ import (
 // Header names used by the API. Spelled once so a typo cannot produce a header a
 // consumer's client library will never look at.
 const (
-	HeaderRequestID           = "X-Request-Id"
-	HeaderAPIKey              = "X-API-Key"
-	HeaderRetryAfter          = "Retry-After"
-	HeaderRateLimitLimit      = "X-RateLimit-Limit"
-	HeaderRateLimitRemaining  = "X-RateLimit-Remaining"
-	HeaderRateLimitReset      = "X-RateLimit-Reset"
-	HeaderQuotaLimit          = "X-Quota-Limit"
-	HeaderQuotaRemaining      = "X-Quota-Remaining"
-	HeaderQuotaReset          = "X-Quota-Reset"
-	HeaderETag                = "ETag"
-	HeaderIfNoneMatch         = "If-None-Match"
-	HeaderCacheControl        = "Cache-Control"
-	HeaderAuthorization       = "Authorization"
-	HeaderXForwardedFor       = "X-Forwarded-For"
+	HeaderRequestID          = "X-Request-Id"
+	HeaderAPIKey             = "X-API-Key"
+	HeaderRetryAfter         = "Retry-After"
+	HeaderRateLimitLimit     = "X-RateLimit-Limit"
+	HeaderRateLimitRemaining = "X-RateLimit-Remaining"
+	HeaderRateLimitReset     = "X-RateLimit-Reset"
+	HeaderQuotaLimit         = "X-Quota-Limit"
+	HeaderQuotaRemaining     = "X-Quota-Remaining"
+	HeaderQuotaReset         = "X-Quota-Reset"
+	HeaderETag               = "ETag"
+	HeaderIfNoneMatch        = "If-None-Match"
+	HeaderCacheControl       = "Cache-Control"
+	HeaderAuthorization      = "Authorization"
+	HeaderXForwardedFor      = "X-Forwarded-For"
+	// HeaderVary is set on every cacheable response so a shared cache cannot serve
+	// one caller's tier-dependent body to another.
+	HeaderVary = "Vary"
+	// HeaderReviewActor carries the reviewer's asserted identity on the internal
+	// review surface. It is not a credential and the platform does not verify it; it
+	// is recorded, with actor_authenticated = false, so the audit trail says exactly
+	// what it knows. See ADR-0021.
+	HeaderReviewActor         = "X-FirmScout-Actor"
 	headerContentTypeKey      = "Content-Type"
 	maxRequestIDLength        = 128
 	slowRequestLogThresholdMS = 500
@@ -67,6 +75,11 @@ const (
 
 // TierAnonymous is the api_tier label and usage plan name for a caller with no key.
 const TierAnonymous = "anonymous"
+
+// varyCredentials lists both credential carriers, not only Authorization: a Vary that
+// named one of them would leave the other's responses interchangeable in a shared
+// cache, which is the whole failure mode this header exists to prevent.
+const varyCredentials = HeaderAuthorization + ", " + HeaderAPIKey
 
 // ---------------------------------------------------------------------------
 // context plumbing
@@ -136,6 +149,16 @@ func (c Caller) Tier() string {
 	}
 	return c.Consumer.Plan
 }
+
+// Plan is the entitlement plan this caller's response is shaped by -- which history
+// window they receive from application.HistoryWindow, and, later, which endpoints they
+// reach.
+//
+// It returns the same string Tier does, and that is deliberate rather than an
+// accident worth removing: the metric label and the entitlement are the same fact, and
+// two functions computing it separately is how a dashboard comes to disagree with what
+// was actually served.
+func (c Caller) Plan() string { return c.Tier() }
 
 // CallerFromContext returns the caller. The zero value is the anonymous caller, which
 // is a supported identity on every read endpoint: the public website calls this same
@@ -433,7 +456,19 @@ func (s *Server) APIKey(next http.Handler) http.Handler {
 			return
 		}
 		if s.apiKeys == nil {
-			WriteProblem(w, r, Unauthenticated(r, "API key authentication is not configured on this deployment."))
+			// Unauthorized, not InvalidAPIKey: the key may be perfectly good, and
+			// telling the caller to replace it would send them to fix something that
+			// is not broken. What is missing is the deployment's ability to check it.
+			WriteProblem(w, r, Unauthorized(r, "API key authentication is not configured on this deployment."))
+			return
+		}
+		if token == "" {
+			// extractAPIKey returns an empty token with ok true for a present but
+			// unparseable Authorization header ("Basic ...", "Bearer" with nothing
+			// after it). Nothing was presented that could be looked up, so this is
+			// "send a credential", not "the one you sent is dead".
+			WriteProblem(w, r, Unauthorized(r,
+				"The Authorization header could not be read as a bearer token. Send \"Authorization: Bearer <api key>\", or the X-API-Key header."))
 			return
 		}
 
@@ -446,7 +481,10 @@ func (s *Server) APIKey(next http.Handler) http.Handler {
 		consumer, keyID, err := s.apiKeys.ResolveByHash(r.Context(), hash)
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
-			WriteProblem(w, r, Unauthenticated(r, "The API key is not valid or has been revoked."))
+			// A well-formed credential that resolves to nothing. Its own type,
+			// because "replace this key" and "send a key" are different instructions
+			// and a consumer that cannot tell them apart retries the dead one.
+			WriteProblem(w, r, InvalidAPIKey(r, "The API key is not valid or has been revoked."))
 			return
 		case err != nil:
 			// The key store is unreachable. This is retryable and is not the
@@ -723,11 +761,34 @@ func quotaWeight(EndpointClass) int { return 1 }
 // two responses with the same ETag are byte-identical, so a conditional request can
 // be answered without re-reading anything downstream.
 //
-// Note for when tiered responses arrive: the plan is for /releases to window history
-// by plan. The moment a response body depends on the caller's tier, this must also
-// emit `Vary: Authorization`, or a shared cache will hand one tier's response to
-// another. Today every response here is identical for every caller, so no Vary is
-// correct and the responses stay cacheable at the edge.
+// # Why an authenticated response is never stored, and Vary is not the mechanism
+//
+// /releases windows history by plan (ADR-0007, api.md §2), so the same URL has two
+// bodies: an anonymous caller's twelve months and a Professional caller's complete
+// archive. The obvious fix is Vary, and Vary alone is not enough. security.md §4.10
+// (T-13) says so in as many words -- "no response to an authenticated request is
+// cached at the CDN at all", because "Vary correctness depends on every layer agreeing,
+// and they do not always" -- and CloudFront, which this architecture names, honours
+// Vary only for Accept-Encoding and ignores every other value. With a URL-only cache
+// key it would hand the paid archive to an anonymous caller, or the empty anonymous
+// page to a paying customer, and the second failure is the worse one because nobody
+// reports it. The response also carries that caller's own X-RateLimit-Remaining and
+// X-Quota-Remaining, which describe one consumer's allowance and no one else's.
+//
+// So the policy is chosen by the caller, not by the route: an authenticated request
+// gets cacheAuthenticated and is storable by nothing, while an anonymous request keeps
+// the route's public policy, which is what the CDN is there for. The rule is uniform
+// across endpoints, immutable /releases/{id} included: a per-endpoint exception has to
+// be got right again on every endpoint added later, and it fails silently when it is
+// wrong.
+//
+// Vary stays on both, as the second line rather than the first. A layer that ignores
+// no-store may still honour Vary, and an anonymous response genuinely is shared, so it
+// must not be reusable for a caller who sent a credential. Both carriers are named,
+// because a Vary listing only Authorization would leave every X-API-Key response
+// interchangeable, and it goes on the 304 as well as the 200: a cache that stored the
+// 200 without the header and then revalidated would still be free to reuse the entry
+// for a different tier.
 func (s *Server) CacheHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -756,7 +817,8 @@ func (s *Server) CacheHeaders(next http.Handler) http.Handler {
 		sum := sha256.Sum256(buf.body.Bytes())
 		etag := `"` + hex.EncodeToString(sum[:]) + `"`
 		dst.Set(HeaderETag, etag)
-		dst.Set(HeaderCacheControl, rc.Cache)
+		dst.Set(HeaderCacheControl, cachePolicyFor(CallerFromContext(ctx), rc.Cache))
+		dst.Set(HeaderVary, varyCredentials)
 
 		route := RoutePatternFromContext(ctx)
 		if etagMatches(r.Header.Get(HeaderIfNoneMatch), etag) {
@@ -772,6 +834,21 @@ func (s *Server) CacheHeaders(next http.Handler) http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(buf.body.Bytes())
 	})
+}
+
+// cachePolicyFor picks the Cache-Control policy for one response: the route's public
+// policy for an anonymous caller, cacheAuthenticated for a caller who presented a
+// credential.
+//
+// The validator is still issued in both cases. no-store forbids the shared storage that
+// T-13 is about; it does not stop the caller from holding their own copy and asking
+// whether it is still current, and refusing them a validator would cost a keyed client
+// bandwidth without protecting anything.
+func cachePolicyFor(caller Caller, routePolicy string) string {
+	if caller.Authenticated {
+		return cacheAuthenticated
+	}
+	return routePolicy
 }
 
 // etagMatches implements the If-None-Match comparison. It accepts "*", a list of

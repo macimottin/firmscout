@@ -66,7 +66,7 @@
             "pdf_text",
             "github_releases"
           ],
-          "description": "html_selectors and text_regex are implemented. The others are declared so a roadmap config fails validation with a clear message rather than a parse error."
+          "description": "html_selectors, text_regex and rss_atom are implemented. The others are declared so a roadmap config fails validation with a clear message rather than a parse error."
         },
         "product_match": {
           "type": "object",
@@ -174,10 +174,9 @@
                   "hardware_revision",
                   "region",
                   "deployment_mode",
-                  "release_notes_url",
-                  "evidence_excerpt",
-                  "release_type"
-                ]
+                  "release_notes_url"
+                ],
+                "description": "Exactly config.go's knownFields. `evidence_excerpt` and `release_type` are spec.extract keys, not per-field names, and the loader rejects them here -- a config that misplaced one under fields used to be accepted by this schema and rejected by the loader, which is worse than either being consistent."
               },
               "additionalProperties": {
                 "$ref": "#/$defs/field"
@@ -198,10 +197,11 @@
                 "saas_release",
                 "management_platform",
                 "security_update",
+                "advisory",
                 "documentation_only",
                 "unknown"
               ],
-              "description": "There is no default. A collector either determines the type or emits `unknown` and routes to classification."
+              "description": "There is no default. A collector either determines the type or emits `unknown` and routes to classification. `advisory` (Phase 2) is a vendor security-advisory document, distinct from `security_update` (an installable release that fixes a vulnerability) -- see domain.ReleaseTypeAdvisory."
             },
             "channel": {
               "type": "string"
@@ -280,7 +280,7 @@
       "properties": {
         "selector": {
           "type": "string",
-          "description": "CSS selector relative to the release container. `:scope` means the container element itself."
+          "description": "CSS selector relative to the release container for html_selectors; a named capture group of spec.extract.release_container for text_regex; one of the closed rss_atom feed-field names (title, link, guid, description, content, pub_date, updated, category, author) for rss_atom. `:scope` means the container element itself in every engine."
         },
         "attribute": {
           "type": "string",
@@ -343,7 +343,8 @@
             "trim",
             "lowercase",
             "uppercase",
-            "collapse_whitespace"
+            "map",
+            "parse_date"
           ]
         },
         {
@@ -362,7 +363,8 @@
                 "trim",
                 "lowercase",
                 "uppercase",
-                "collapse_whitespace"
+                "map",
+                "parse_date"
               ]
             },
             "pattern": {

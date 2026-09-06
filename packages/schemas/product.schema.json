@@ -74,6 +74,7 @@
             "saas_release",
             "management_platform",
             "security_update",
+            "advisory",
             "documentation_only",
             "unknown"
           ],
@@ -88,7 +89,8 @@
             "eos",
             "unknown"
           ],
-          "default": "active"
+          "default": "unknown",
+          "description": "Most vendors publish no firmware-lifecycle statement at all, so an omitted line defaults to \"unknown\" rather than asserting \"active\" -- a claim the absence of a line does not support."
         },
         "security_critical": {
           "type": "boolean",
@@ -135,6 +137,35 @@
               "source_note": {
                 "type": "string",
                 "maxLength": 1000
+              }
+            }
+          }
+        },
+        "runs": {
+          "type": "array",
+          "description": "Products this product runs, most usefully the operating system a hardware model runs. This is a navigation edge -- 'the firmware for this box is published over there' -- and explicitly not an applicability claim: which release of that product applies to this exact model is a separate question this list does not answer.",
+          "items": {
+            "type": "object",
+            "required": [
+              "product"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "product": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+                "description": "The registry slug of the product this one runs. It must exist in the registry; a slug that does not fails the sync with an error naming this file."
+              },
+              "kind": {
+                "enum": [
+                  "runs_os"
+                ],
+                "default": "runs_os"
+              },
+              "source_note": {
+                "type": "string",
+                "maxLength": 1000,
+                "description": "Where this assertion came from: the URL fetched, when it was fetched, and the excerpt that says it."
               }
             }
           }

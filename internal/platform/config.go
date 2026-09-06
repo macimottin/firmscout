@@ -66,6 +66,13 @@ type Config struct {
 	RegistryDir  string
 	CollectorDir string
 	ArtifactDir  string
+
+	// ReviewAPIEnabled exposes the /internal review surface. It defaults to false and
+	// there is deliberately no environment in which it defaults to true: the surface
+	// performs writes -- publishing a release, resolving a conflict -- on the word of
+	// an actor nobody authenticated (ADR-0021). Reaching it must take a decision
+	// somebody made on purpose, not an unset variable.
+	ReviewAPIEnabled bool
 }
 
 // DefaultUserAgent identifies FirmScout to the sites it monitors, including a contact
@@ -101,6 +108,7 @@ func Load(service string) (Config, error) {
 		RegistryDir:         env("FIRMSCOUT_REGISTRY_DIR", "dataset"),
 		CollectorDir:        env("FIRMSCOUT_COLLECTOR_DIR", "collectors/config"),
 		ArtifactDir:         env("FIRMSCOUT_ARTIFACT_DIR", ".artifacts"),
+		ReviewAPIEnabled:    envBool("FIRMSCOUT_REVIEW_API_ENABLED", false),
 	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err

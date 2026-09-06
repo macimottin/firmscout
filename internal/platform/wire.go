@@ -38,6 +38,8 @@ type Container struct {
 	Releases   application.ReleaseRepository
 	Evidence   application.EvidenceRepository
 	Reviews    application.ReviewRepository
+	Conflicts  application.ConflictRepository
+	Audit      application.AuditRepository
 	Summaries  application.SummaryRepository
 	Queue      application.JobQueue
 
@@ -101,6 +103,8 @@ func Build(ctx context.Context, cfg Config) (*Container, error) {
 		Releases:   postgres.NewReleaseRepo(db),
 		Evidence:   postgres.NewEvidenceRepo(db),
 		Reviews:    postgres.NewReviewRepo(db),
+		Conflicts:  postgres.NewConflictRepo(db),
+		Audit:      postgres.NewAuditRepo(db),
 		Summaries:  postgres.NewSummaryRepo(db),
 		Queue:      postgres.NewQueue(db),
 		Artifacts:  postgres.NewArtifactStore(db, blobs),
@@ -133,6 +137,12 @@ func (c *Container) AddCloser(f func(context.Context) error) {
 }
 
 // IngestDeps assembles the dependency struct the ingestion use cases take.
+//
+// Conflicts and Audit are not optional here even though ValidateCandidate tolerates a
+// nil Conflicts port. A nil port makes gate 10 unable to see a disagreement at all, so
+// the pipeline would publish a contested version and report that nothing was wrong --
+// the exact failure ADR-0020 exists to prevent. Wiring them in the composition root is
+// what makes "the projection is not wired" a deployment bug nobody can ship.
 func (c *Container) IngestDeps() application.IngestDeps {
 	return application.IngestDeps{
 		Sources:             c.Sources,
@@ -141,6 +151,8 @@ func (c *Container) IngestDeps() application.IngestDeps {
 		Releases:            c.Releases,
 		Evidence:            c.Evidence,
 		Reviews:             c.Reviews,
+		Conflicts:           c.Conflicts,
+		Audit:               c.Audit,
 		Artifacts:           c.Artifacts,
 		Registry:            c.Collectors,
 		Queue:               c.Queue,
@@ -150,6 +162,63 @@ func (c *Container) IngestDeps() application.IngestDeps {
 		IDs:                 c.IDs,
 		ConfidenceThreshold: c.Config.ConfidenceThreshold,
 		FutureDateTolerance: c.Config.FutureDateTolerance,
+	}
+}
+
+// ReviewDeps assembles the dependency struct a human review decision takes.
+//
+// The publisher is a parameter rather than something this method builds, because an
+// accepted review item must publish through the same PublishRelease instance the worker
+// runs. Building a second one here would be harmless today and a divergence the first
+// time publication grows a cache, a metric or a rate limit -- and a hand-approved
+// release differing from an automatically published one is precisely the class of
+// difference an audit trail cannot explain.
+func (c *Container) ReviewDeps(publisher *application.PublishRelease) application.ReviewDeps {
+	return application.ReviewDeps{
+		Reviews:    c.Reviews,
+		Candidates: c.Candidates,
+		Conflicts:  c.Conflicts,
+		Audit:      c.Audit,
+		Publisher:  publisher,
+		Releases:   c.Releases,
+		Events:     c.Events,
+		UoW:        c.DB,
+		Clock:      c.Clock,
+		IDs:        c.IDs,
+	}
+}
+
+// ReviewQueryDeps assembles the dependency struct the reviewer's read side takes.
+//
+// Every port in it is read-only, which is the property that lets this surface be served
+// from a replica later without revisiting who may write what.
+func (c *Container) ReviewQueryDeps() application.ReviewQueryDeps {
+	return application.ReviewQueryDeps{
+		Reviews:    c.Reviews,
+		Candidates: c.Candidates,
+		Evidence:   c.Evidence,
+		Sources:    c.Sources,
+		Products:   c.Products,
+		Vendors:    c.Vendors,
+		Conflicts:  c.Conflicts,
+		Audit:      c.Audit,
+		Clock:      c.Clock,
+	}
+}
+
+// ConflictQueryDeps assembles the dependency struct the open-conflict read side takes.
+//
+// It is separate from ReviewQueryDeps rather than folded into it because the two answer
+// different questions: the review queue lists work a human has been asked to do, while
+// this lists disagreements the detector has opened -- including the ones no queue item
+// covers, which is the failure the surface exists to expose.
+func (c *Container) ConflictQueryDeps() application.ConflictQueryDeps {
+	return application.ConflictQueryDeps{
+		Conflicts: c.Conflicts,
+		Products:  c.Products,
+		Vendors:   c.Vendors,
+		Reviews:   c.Reviews,
+		Clock:     c.Clock,
 	}
 }
 

@@ -1,0 +1,48 @@
+# =============================================================================
+# Vendor: Poly
+# =============================================================================
+# Registered to hold the relocation pilot in
+# dataset/sources/poly/documentation-portal.yaml. Poly is the vendor whose own
+# documentation domain stopped being its own documentation domain, which is why
+# the source registry models relocation as a first-class state rather than as an
+# undifferentiated fetch failure (blueprint sec 7.7).
+#
+# The HP relationship recorded below is not taken from a press release; it was
+# measured on 2026-09-05 as a redirect:
+#   GET https://www.poly.com/
+#     -> HTTP/1.1 301, location: /br/pt
+#     -> HTTP/1.1 301, location: https://www.hp.com/br-pt/poly.html
+#     -> HTTP/2 200
+#   GET https://docs.poly.com/
+#     -> HTTP/1.1 301, location: https://support.hp.com/
+# Both chains were observed from a Brazilian egress address and both final hops
+# are locale-specific, so the exact landing URL is not reproducible from another
+# country. The part that is reproducible, and the part that matters here, is the
+# first hop off poly.com onto an HP-controlled host.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Vendor
+
+metadata:
+  slug: poly
+
+spec:
+  name: Poly
+  # Not legal_name: this pass measured redirects, not a corporate register, and
+  # the entity behind the brand after the acquisition is exactly the kind of
+  # fact that should be looked up rather than assumed.
+  homepage_url: https://www.poly.com
+  support_url: https://support.hp.com
+  notes: >-
+    Audio and video conferencing hardware. Measured 2026-09-05: both
+    www.poly.com and docs.poly.com now 301 onto HP-controlled hosts, so Poly's
+    published material is served from support.hp.com and www.hp.com. Registered
+    for the source-relocation pilot; no Poly product is registered, because no
+    per-product document URL on the new host could be verified -- see
+    dataset/sources/poly/documentation-portal.yaml for that measurement.
+  # No aliases. "Polycom" and "Plantronics" are the obvious candidates and are
+  # almost certainly right, but "almost certainly" is not a measurement, and
+  # aliases drive product matching -- a wrong one silently attaches another
+  # company's releases to this vendor. They go in when someone reads them off a
+  # Poly or HP page and records where.

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Vendor Thing Releases (Atom)</title>
+  <link rel="self" href="https://example.test/releases.atom"/>
+  <entry>
+    <title>Test Vendor Thing 7.24.2 released</title>
+    <link rel="alternate" href="https://example.test/releases/7.24.2"/>
+    <id>https://example.test/releases/7.24.2</id>
+    <published>Thu, 03 Sep 2026 00:00:00 -0700</published>
+  </entry>
+</feed>

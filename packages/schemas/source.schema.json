@@ -61,7 +61,7 @@
             "type": "string",
             "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
           },
-          "description": "Every product this source covers. One catalogue page serving forty products is fetched once, which is the largest single saving available in the system."
+          "description": "Every product this source covers. One catalogue page serving forty products is fetched once, which is the largest single saving available in the system. Loaded but not yet applied: registry sync does not write the source_products rows this describes, so filling it in has no effect today (see internal/application/registry.go, RegistryDocument.SourceProducts)."
         },
         "source_type": {
           "enum": [

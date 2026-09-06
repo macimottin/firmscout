@@ -1,13 +1,36 @@
 # =============================================================================
 # Source: MikroTik RouterOS "newest stable" pointer file
 # =============================================================================
-# Measured 2026-09-03:
+# Measured 2026-09-03, re-measured 2026-09-05:
 #   GET https://upgrade.mikrotik.com/routeros/NEWESTa7.stable
 #     -> Content-Type: text/plain
 #     -> body exactly "7.24.2 1788429434" (a version, one space, a Unix epoch)
 #     -> serves BOTH an ETag and a Last-Modified header
-#   GET https://mikrotik.com/robots.txt
-#     -> "User-agent: *" with an empty "Disallow:", i.e. nothing is disallowed.
+#     -> Last-Modified: Thu, 03 Sep 2026 12:31:14 GMT on 2026-09-05, byte-identical to
+#        the 2026-09-03 reading, so the recorded fixture is still faithful.
+#     -> NEW on 2026-09-05: every response carries x-ratelimit-limit and
+#        x-ratelimit-remaining (read 6066 and 6042 at 18:19:57Z; live counters).
+#   GET https://upgrade.mikrotik.com/robots.txt
+#     -> HTTP 403 on 2026-09-05. Not 404: the host refuses to serve the file rather
+#        than reporting it absent. No robots.txt is served for this host at all.
+#
+# The earlier version of this comment recorded https://mikrotik.com/robots.txt here.
+# That was evidence about the wrong host. robots.txt is scoped to a scheme, host and
+# port, so the apex's file governs mikrotik.com and says nothing whatever about
+# upgrade.mikrotik.com, which is where this source actually lives.
+#
+# Why robots_policy_status is "allowed" and not "not_applicable": RFC 9309 sec 2.3.1.3
+# makes an unavailable robots.txt a full allow, and RobotsCache.policyFor treats every
+# 4xx that way, so at runtime this host is crawlable. "not_applicable" is for sources
+# robots.txt does not govern; this is an ordinary public HTTPS host that it does
+# govern, and the file is merely unavailable. Both values are dispatchable, so the
+# choice changes no behaviour -- it changes whether the registry states the true
+# reason. A 403 is still not a 404, and a conservative reading could treat an active
+# refusal as an access policy; that reading is a human's to make, not this file's.
+#
+# KNOWN GAP, recorded and deliberately not fixed here: the fetcher honours Retry-After
+# and 429 but reads no X-RateLimit-* header. This source publishes its budget and
+# FirmScout can only discover it by exhausting it.
 #
 # This is the cheapest possible watcher: a conditional GET against a body of a
 # few bytes, answered with 304 on every check that finds no new release.
@@ -21,9 +44,31 @@
 # ------------------------------- ADR-0018 ------------------------------------
 # This source ships with enabled: false and terms_review_status: pending because
 # ADR-0018 requires a human to review the site's terms of use before any
-# collection happens. robots_policy_status is a mechanical, measured fact;
-# terms_review_status is a human judgement that has not yet been made. Neither
-# this file nor the collector config may enable collection until it has been.
+# collection happens, and because this repository's own regression test
+# (TestEverySourceShipsPendingTermsReview, internal/adapters/registry) refuses to
+# let ANY source in the committed dataset be collectable by default -- cloning
+# this public repository and running its documented Quick Start must never, on
+# its own, cause a request against a manufacturer's live infrastructure.
+# robots_policy_status is a mechanical, measured fact; terms_review_status is a
+# human judgement, and what follows records one that has in fact been made, on a
+# specific working copy, without changing what ships here.
+#
+# Measured 2026-09-05: MikroTik publishes no terms of use. /terms, /terms.html,
+# /legal, /terms-of-use and /tos all return 404; the sitemap's only legal document
+# is /privacy; that page's headings are "Privacy Policy" and "Processing of
+# personal data by MikroTik" and it contains no occurrence of "crawl", "scrape",
+# "automated", "robot", "reuse" or "redistribute".
+#
+# On 2026-09-05 the repository owner reviewed exactly this evidence and
+# explicitly authorized a live collection run against it, in these words: "pode
+# rodar o check-source contra a MikroTik". That authorization was applied to a
+# local working database for one session's demonstration, not committed here,
+# for the reason stated above: this file's job is to describe what the public
+# project ships, and what the project ships stays conservative until a
+# deliberate, reviewed decision -- its own PR, updating DATA_SOURCES.md and this
+# regression test together -- makes it the committed default. Until then, no
+# published terms is not the same as permission, so the judgement recorded here
+# stays pending. See docs/adr/0018-source-compliance-policy.md.
 # -----------------------------------------------------------------------------
 
 apiVersion: firmscout.dev/v1alpha1
@@ -44,15 +89,24 @@ spec:
 
   # Compliance -- see the ADR-0018 note above.
   robots_policy_status: allowed
-  robots_checked_at: 2026-09-03T00:00:00Z
+  robots_checked_at: 2026-09-05T18:19:57Z
   terms_review_status: pending
   terms_review_note: >-
-    ADR-0018: a human must review mikrotik.com's terms of use before this source
-    is enabled. robots.txt permits the path (measured 2026-09-03), but robots
-    permission alone is not sufficient.
+    ADR-0018: a human must review MikroTik's terms of use before this source is
+    collectable IN THE COMMITTED REGISTRY. Measured 2026-09-05:
+    upgrade.mikrotik.com serves no robots.txt at all (HTTP 403, not 404), which
+    RFC 9309 and RobotsCache.policyFor both treat as a full allow; and MikroTik
+    publishes no terms of use anywhere (/terms, /terms.html, /legal,
+    /terms-of-use and /tos are 404, and the only legal document in the sitemap
+    is a personal-data privacy notice silent on automated access). No published
+    terms is not the same as permission, so the committed judgement stays
+    pending. A human review against exactly this evidence DID happen on
+    2026-09-05, and was applied to a local working database rather than to this
+    file -- see the ADR-0018 note above for why those are different decisions.
   authentication_type: none
 
-  # Not collected from until the terms review above is complete.
+  # Not collected from until the terms review above is complete, in this
+  # committed file. See the ADR-0018 note above.
   enabled: false
   health: pending_review
 

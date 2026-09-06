@@ -1,0 +1,70 @@
+# =============================================================================
+# Device: MikroTik hAP be lite
+# =============================================================================
+# See ADR-0024 and hap-ax3.yaml for the standing note on device documents.
+#
+# Provenance:
+#   GET https://mikrotik.com/product/hap_be_lite
+#     fetched 2026-09-06T01:18:58Z, HTTP 200, 414762 bytes.
+#
+# Verbatim excerpts, whitespace-collapsed:
+#   name             <h1 class="font-bold mtk-h4 md:mtk-h3 lg:mtk-h1">hAP be lite
+#   model_identifier Product code </span> <span class="basis-1/2 font-light
+#                    break-words"> A42G-HbeP
+#   family           Architecture </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> ARM 32bit
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   runs             Operating System </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> RouterOS v7
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   category         breadcrumb: Home / Hardware / Indoor wireless
+#
+# Also measured and not recorded: Size of RAM 512 MB, Storage size 128 MB.
+#
+# This device and CRS328-24P-4S+RM are both "ARM 32bit" and are both offered
+# the same base image, routeros-7.24.2-arm.npk -- which is the family's whole
+# claim. They are NOT offered the same package set: this page additionally links
+# https://download.mikrotik.com/routeros/7.24.2/wifi-mediatek-7.24.2-arm.npk and
+# the switch page links no wireless package at all. That measured difference,
+# inside one architecture, is why ADR-0024 restricts a family to a shared base
+# image file and forbids a family-targeted release mapping.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: mikrotik-hap-be-lite
+  vendor: mikrotik
+  family: arm-32bit
+
+spec:
+  name: hAP be lite
+  model_identifier: A42G-HbeP
+  lifecycle_status: unknown
+
+  category_slugs:
+    - network-devices
+    - wireless-devices
+
+  aliases:
+    - alias: A42G-HbeP
+      kind: model_number
+      source_note: >-
+        The "Product code" specification on
+        https://mikrotik.com/product/hap_be_lite, fetched 2026-09-06T01:18:58Z.
+    - alias: hAP be lite
+      kind: marketing_name
+      source_note: >-
+        The page's own <h1>. Recorded separately from the product name because
+        the product code and the marketing name differ here, and a fleet
+        inventory may hold either.
+
+  runs:
+    - product: mikrotik-routeros
+      kind: runs_os
+      source_note: >-
+        https://mikrotik.com/product/hap_be_lite, fetched 2026-09-06T01:18:58Z:
+        Operating System "RouterOS v7". The same page links the device-resolved
+        image
+        https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-arm.npk

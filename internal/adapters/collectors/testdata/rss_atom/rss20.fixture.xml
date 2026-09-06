@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Vendor Thing Releases</title>
+    <link>https://example.test/releases</link>
+    <description>Synthetic feed for engine tests. Not a real vendor.</description>
+    <item>
+      <title>Test Vendor Thing 7.24.2 released</title>
+      <link>https://example.test/releases/7.24.2</link>
+      <guid>https://example.test/releases/7.24.2</guid>
+      <category>Stable</category>
+      <pubDate>Thu, 03 Sep 2026 00:00:00 -0700</pubDate>
+      <description>Routine maintenance release.</description>
+    </item>
+    <item>
+      <title>Test Vendor Thing 7.21.5 released</title>
+      <link>https://example.test/releases/7.21.5</link>
+      <guid>https://example.test/releases/7.21.5</guid>
+      <category>Long-term</category>
+      <pubDate>Mon, 06 Jul 2026 00:00:00 -0700</pubDate>
+      <description>Long-term support release.</description>
+    </item>
+  </channel>
+</rss>

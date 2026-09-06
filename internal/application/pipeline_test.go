@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,8 @@ type fixture struct {
 	releases   *apptest.Releases
 	evidence   *apptest.EvidenceStore
 	reviews    *apptest.Reviews
+	conflicts  *apptest.Conflicts
+	audit      *apptest.Audit
 	queue      *apptest.Queue
 	artifacts  *apptest.Artifacts
 	events     *apptest.Events
@@ -59,6 +62,8 @@ func newFixture(t *testing.T) *fixture {
 		releases:   apptest.NewReleases(),
 		evidence:   apptest.NewEvidenceStore(),
 		reviews:    &apptest.Reviews{},
+		conflicts:  apptest.NewConflicts(),
+		audit:      apptest.NewAudit(),
 		queue:      apptest.NewQueue(),
 		artifacts:  apptest.NewArtifacts(),
 		events:     &apptest.Events{},
@@ -126,6 +131,8 @@ func (f *fixture) ingestDeps() application.IngestDeps {
 		Releases:   f.releases,
 		Evidence:   f.evidence,
 		Reviews:    f.reviews,
+		Conflicts:  f.conflicts,
+		Audit:      f.audit,
 		Artifacts:  f.artifacts,
 		Registry:   &apptest.Registry{C: f.collector},
 		Queue:      f.queue,
@@ -474,7 +481,10 @@ func TestFullPipelinePublishesARelease(t *testing.T) {
 			len(f.candidates.Validations[candidateID]), len(domain.GateOrder()))
 	}
 
-	// 4. Publish.
+	// 4. Publish. Validation is transactional too now, so the transaction count is read
+	// as a delta: what this test asserts is that publication is one unit of work, not
+	// that the pipeline as a whole only ever opens one.
+	transactionsBeforePublication := f.uow.Transactions
 	pubRes, err := application.NewPublishRelease(deps).Execute(ctx, candidateID)
 	if err != nil {
 		t.Fatalf("publish: %v", err)
@@ -507,8 +517,8 @@ func TestFullPipelinePublishesARelease(t *testing.T) {
 	}
 
 	// The whole publication must be one transaction.
-	if f.uow.Transactions != 1 {
-		t.Errorf("publication opened %d transactions, want 1", f.uow.Transactions)
+	if opened := f.uow.Transactions - transactionsBeforePublication; opened != 1 {
+		t.Errorf("publication opened %d transactions, want 1", opened)
 	}
 	if len(f.releases.SummaryRefresh) != 1 {
 		t.Errorf("product summary refreshed %d times, want 1", len(f.releases.SummaryRefresh))
@@ -769,5 +779,253 @@ func TestLatestObservedFlagMovesWithoutRewritingHistory(t *testing.T) {
 	}
 	if flagged != 1 {
 		t.Errorf("%d mappings claim to be latest, want exactly 1", flagged)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Multi-source conflict detection
+// ---------------------------------------------------------------------------
+
+const secondSourceID = "src_mikrotik_release_notes"
+
+// addSecondSource registers another official source for the same product, which is what
+// makes a disagreement possible at all: one source can never conflict with itself.
+func (f *fixture) addSecondSource(t *testing.T) domain.Source {
+	t.Helper()
+	src := f.source
+	src.ID = secondSourceID
+	src.Slug = "release-notes"
+	src.URL = "https://mikrotik.com/download/release-notes"
+	f.sources.Add(src)
+	f.sources.SetProducts(secondSourceID, []domain.Product{f.product})
+	return src
+}
+
+// validateFrom runs extraction and validation for one source's candidate, which is the
+// shape every conflict test needs: two sources, each reporting its own version.
+func (f *fixture) validateFrom(t *testing.T, srcID, hash, version, date string) application.ValidateResult {
+	t.Helper()
+	ctx := context.Background()
+	f.collector = &apptest.Collector{CollectorID: "c", Ver: "1",
+		Candidates: []domain.CandidateRelease{f.candidateFor(t, version, date)}}
+	deps := f.ingestDeps()
+	artID, _, err := f.artifacts.Put(ctx, hash, "text/html", []byte(version))
+	if err != nil {
+		t.Fatalf("store artifact: %v", err)
+	}
+	ex, err := application.NewExtractCandidates(deps).Execute(ctx, srcID, artID)
+	if err != nil {
+		t.Fatalf("extract from %s: %v", srcID, err)
+	}
+	res, err := application.NewValidateCandidate(deps).Execute(ctx, ex.CandidateIDs[0])
+	if err != nil {
+		t.Fatalf("validate from %s: %v", srcID, err)
+	}
+	return res
+}
+
+// The revert detector for "one disagreement, one queue item". Two official sources
+// reporting different versions must open exactly one conflict and file exactly one
+// review item, no matter how many times either source is re-checked.
+func TestValidateCandidateOpensConflictAndReusesReviewItem(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.addSecondSource(t)
+
+	// The first source's claim is uncontested, so it passes every gate.
+	first := f.validateFrom(t, sourceID, "h1", "7.24.3", "2026-09-02")
+	if first.Decision != domain.GatePassed {
+		t.Fatalf("first source decision = %q, want passed (%s)", first.Decision, first.Reason)
+	}
+	if first.ConflictID != "" {
+		t.Fatalf("a conflict was opened with only one source reporting: %s", first.ConflictID)
+	}
+
+	// The second source disagrees. Both are official manufacturer sources, so the
+	// authority ladder has nothing to appeal to and the disagreement is the finding.
+	second := f.validateFrom(t, secondSourceID, "h2", "7.24.1", "2026-09-01")
+	if second.Decision != domain.GateReviewRequired {
+		t.Fatalf("second source decision = %q, want review_required (%s)", second.Decision, second.Reason)
+	}
+	if second.ConflictID == "" {
+		t.Fatal("two sources reported different versions and no conflict was recorded")
+	}
+	if second.ReviewItemID == "" {
+		t.Fatal("a conflict was recorded with no review item for a human to act on")
+	}
+
+	// Re-checking the first source finds the same disagreement from the other side.
+	// It must attach to the conflict already open rather than filing a second one.
+	third := f.validateFrom(t, sourceID, "h3", "7.24.3", "2026-09-02")
+	if third.ConflictID != second.ConflictID {
+		t.Errorf("conflict id = %q, want the already-open %q", third.ConflictID, second.ConflictID)
+	}
+	if third.ReviewItemID != second.ReviewItemID {
+		t.Errorf("review item = %q, want the existing %q", third.ReviewItemID, second.ReviewItemID)
+	}
+
+	if open := f.conflicts.OpenConflicts(); len(open) != 1 {
+		t.Fatalf("%d open conflicts, want exactly 1", len(open))
+	}
+	if len(f.reviews.Items) != 1 {
+		t.Fatalf("review queue has %d items, want exactly 1 for one disagreement", len(f.reviews.Items))
+	}
+	if n := f.events.Count(domain.EventSourceConflictDetected); n != 1 {
+		t.Errorf("published %d SourceConflictDetected events, want 1", n)
+	}
+
+	item := f.reviews.Items[0]
+	if item.Kind != "multi_source_conflict" {
+		t.Errorf("review item kind = %q, want multi_source_conflict", item.Kind)
+	}
+	if item.Payload[application.PayloadKeyConflictID] != second.ConflictID {
+		t.Errorf("review payload conflict id = %q, want %q",
+			item.Payload[application.PayloadKeyConflictID], second.ConflictID)
+	}
+	if got := item.Payload[application.PayloadKeyConflictVersions]; got != "7.24.1,7.24.3" {
+		t.Errorf("review payload versions = %q, want both participants", got)
+	}
+	if got := item.Payload[application.PayloadKeyFailingGate]; got != string(domain.GateMultiSourceAgree) {
+		t.Errorf("review payload failing gate = %q, want %q", got, domain.GateMultiSourceAgree)
+	}
+	if item.SLAClass != string(domain.SLAHigh) {
+		t.Errorf("sla class = %q, want high for an unresolved conflict", item.SLAClass)
+	}
+}
+
+// A conflicted candidate never reaches publication on its own: no publication job is
+// enqueued and no release row exists until a human decides.
+func TestConflictedCandidateIsNeverPublished(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.addSecondSource(t)
+
+	f.validateFrom(t, sourceID, "h1", "7.24.3", "2026-09-02")
+	before := len(f.queue.JobsOfKind(application.JobPublishRelease))
+
+	second := f.validateFrom(t, secondSourceID, "h2", "7.24.1", "2026-09-01")
+
+	if second.PublicationEnqueued {
+		t.Error("a conflicted candidate was cleared to publish")
+	}
+	if after := len(f.queue.JobsOfKind(application.JobPublishRelease)); after != before {
+		t.Errorf("%d publication jobs enqueued for a conflicted candidate", after-before)
+	}
+	if f.releases.Count() != 0 {
+		t.Errorf("%d releases were published while sources disagree", f.releases.Count())
+	}
+}
+
+// Two sources agreeing is the ordinary case and must produce no conflict at all -- the
+// detector has to be able to say "they agree", not only "they might not".
+func TestAgreeingSourcesProduceNoConflict(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.addSecondSource(t)
+
+	first := f.validateFrom(t, sourceID, "h1", "7.24.3", "2026-09-02")
+	second := f.validateFrom(t, secondSourceID, "h2", "7.24.3", "2026-09-02")
+
+	if first.ConflictID != "" || second.ConflictID != "" {
+		t.Fatalf("agreeing sources produced conflicts %q and %q", first.ConflictID, second.ConflictID)
+	}
+	if open := f.conflicts.OpenConflicts(); len(open) != 0 {
+		t.Fatalf("%d open conflicts for two sources reporting the same version", len(open))
+	}
+	if len(f.reviews.Items) != 0 {
+		t.Errorf("review queue has %d items for a non-disagreement", len(f.reviews.Items))
+	}
+}
+
+// A disagreement the authority ladder settles does not block publication, and the losing
+// observation is retained rather than discarded.
+func TestOutrankedDisagreementDoesNotBlockPublication(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	community := f.addSecondSource(t)
+	community.QualityClass = domain.QualityTrustedCommunity
+	community.Official = false
+	f.sources.Add(community)
+
+	f.validateFrom(t, secondSourceID, "h1", "7.24.1", "2026-09-01")
+	official := f.validateFrom(t, sourceID, "h2", "7.24.3", "2026-09-02")
+
+	if official.Decision != domain.GatePassed {
+		t.Fatalf("decision = %q, want passed; a community source outranked the manufacturer (%s)",
+			official.Decision, official.Reason)
+	}
+	if official.ConflictID != "" {
+		t.Errorf("an outranked disagreement was recorded as a conflict: %s", official.ConflictID)
+	}
+	gates := f.candidates.Validations[official.CandidateID]
+	var detail string
+	for _, g := range gates {
+		if g.Gate == domain.GateMultiSourceAgree {
+			detail = g.Detail
+		}
+	}
+	if !strings.Contains(detail, "7.24.1") {
+		t.Errorf("gate 10 detail %q does not name the outranked version a reviewer would look for", detail)
+	}
+}
+
+func TestValidateCandidateRefreshesSummaryOnConflict(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.addSecondSource(t)
+
+	f.validateFrom(t, sourceID, "h1", "7.24.3", "2026-09-02")
+	refreshedBefore := len(f.releases.SummaryRefresh)
+
+	f.validateFrom(t, secondSourceID, "h2", "7.24.1", "2026-09-01")
+
+	// Refreshed synchronously rather than through JobRefreshSummary: the worker leases
+	// four job kinds and that is not one of them, so an enqueued refresh would never
+	// run and has_source_conflict would never become true.
+	var refreshed bool
+	for _, id := range f.releases.SummaryRefresh[refreshedBefore:] {
+		if id == productID {
+			refreshed = true
+		}
+	}
+	if !refreshed {
+		t.Fatalf("the product summary was not refreshed when the conflict opened: %v", f.releases.SummaryRefresh)
+	}
+}
+
+// An advisory is a document about vulnerabilities, not a version anybody upgrades to.
+// It must never become the answer to "what is the latest version", even when it is the
+// only release the product has.
+func TestPublishAdvisoryIsNeverLatest(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	ctx := context.Background()
+
+	advisory := f.candidateFor(t, "FG-IR-26-163", "2026-08-12")
+	advisory.ReleaseType = domain.ReleaseTypeAdvisory
+	f.collector = &apptest.Collector{CollectorID: "c", Ver: "1", Candidates: []domain.CandidateRelease{advisory}}
+	deps := f.ingestDeps()
+	artID, _, _ := f.artifacts.Put(ctx, "h", "text/html", []byte("advisory"))
+	ex, err := application.NewExtractCandidates(deps).Execute(ctx, sourceID, artID)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if _, err := application.NewValidateCandidate(deps).Execute(ctx, ex.CandidateIDs[0]); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	res, err := application.NewPublishRelease(deps).Execute(ctx, ex.CandidateIDs[0])
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if !res.Published {
+		t.Fatalf("the advisory was not published at all: %s", res.Reason)
+	}
+	for _, m := range f.releases.Mappings() {
+		if m.IsLatestObserved {
+			t.Fatal("an advisory was flagged as the latest observed release for the product")
+		}
+	}
+	if _, err := f.releases.LatestForProduct(ctx, productID, "stable"); err == nil {
+		t.Error("an advisory answered \"what is the latest version\"")
 	}
 }

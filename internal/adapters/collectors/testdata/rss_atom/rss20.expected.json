@@ -1,0 +1,36 @@
+{
+  "collectorId": "test.rss-basic",
+  "note": "SYNTHETIC. Not a real vendor. Exercises RSS 2.0: a version captured from the title, an exact-day pubDate, and a mapped category-as-channel.",
+  "candidates": [
+    {
+      "rawVersion": "7.24.2",
+      "normalizedVersion": "7.24.2",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-09-03"
+      },
+      "releaseType": "embedded_os",
+      "channel": "stable",
+      "applicability": {
+        "productHint": "test-vendor-thing"
+      },
+      "evidenceExcerptContains": "Test Vendor Thing 7.24.2 released",
+      "confidenceAtLeast": 0.9
+    },
+    {
+      "rawVersion": "7.21.5",
+      "normalizedVersion": "7.21.5",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-07-06"
+      },
+      "releaseType": "embedded_os",
+      "channel": "long_term",
+      "applicability": {
+        "productHint": "test-vendor-thing"
+      },
+      "evidenceExcerptContains": "Test Vendor Thing 7.21.5 released",
+      "confidenceAtLeast": 0.9
+    }
+  ]
+}

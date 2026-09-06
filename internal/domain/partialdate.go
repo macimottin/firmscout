@@ -168,6 +168,38 @@ func (d PartialDate) ExactDay() (time.Time, bool) {
 	return d.anchor, true
 }
 
+// PeriodEnd returns the last calendar day the published precision could denote: the
+// day itself at exact-day precision, the final day of the month at month precision,
+// 31 December at year precision, and the zero time when the date is unknown.
+//
+// It is the counterpart to Anchor, and it exists because Anchor alone cannot answer a
+// range question honestly. Anchor is the *earliest* day a reduced-precision date could
+// mean, so comparing it against the opening boundary of a window hides releases: a
+// release the vendor dated only "2025" anchors at 1 January and vanishes from a window
+// opening in September, even though the vendor may well have shipped it in December.
+// Asking instead whether the period *ends* on or after the boundary asks the question
+// the caller actually means -- could any day this date could denote fall inside the
+// window? -- and errs towards showing a release rather than concealing one.
+//
+// The returned day is a comparison bound, not data. It must never be displayed, stored
+// or presented as the release date: at month or year precision its day component is
+// FirmScout's arithmetic, not the vendor's claim, and that is exactly the manufactured
+// precision ADR-0017 forbids. The type still exposes no Day() accessor for that reason.
+func (d PartialDate) PeriodEnd() time.Time {
+	switch d.Precision() {
+	case PrecisionExactDay:
+		return d.anchor
+	case PrecisionMonthOnly:
+		// The anchor is guaranteed to be day 1, so this lands on the last day of the
+		// same month for every month length, February in a leap year included.
+		return d.anchor.AddDate(0, 1, -1)
+	case PrecisionYearOnly:
+		return d.anchor.AddDate(1, 0, -1)
+	default:
+		return time.Time{}
+	}
+}
+
 // String renders the date at exactly the precision it is known to: YYYY-MM-DD, YYYY-MM,
 // YYYY, or the empty string. This is the representation the API presenter serves, so a
 // consumer cannot parse a day that was never published.

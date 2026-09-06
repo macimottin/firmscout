@@ -25,6 +25,11 @@ except ImportError:
 PAIRS = [
     ("packages/schemas/vendor.schema.json", "dataset/vendors/*.yaml"),
     ("packages/schemas/category.schema.json", "dataset/categories.yaml"),
+    # Families live in a tree of their own rather than under dataset/products/,
+    # because the product pattern below matches recursively: a family document filed
+    # beside the devices it groups would be validated against product.schema.json and
+    # fail CI for the wrong reason.
+    ("packages/schemas/family.schema.json", "dataset/families/**/*.yaml"),
     ("packages/schemas/product.schema.json", "dataset/products/**/*.yaml"),
     ("packages/schemas/source.schema.json", "dataset/sources/**/*.yaml"),
     ("packages/schemas/collector-config.schema.json", "collectors/config/**/*.yaml"),

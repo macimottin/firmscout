@@ -5,6 +5,33 @@ import (
 	"time"
 )
 
+// ReleaseSource is the release's provenance: the registered source behind the
+// evidence cited by EvidenceID.
+//
+// URL is deliberately the evidence's own recorded URL rather than the source's
+// currently configured one -- see Evidence.SourceURL's comment on why that can be
+// more specific, and because a source's registered URL can move (Source.RelocatedToSourceID)
+// after the evidence that cites it was captured, while the page a reader can still open
+// to verify a published fact must stay the one that was actually read.
+type ReleaseSource struct {
+	URL string
+	// Kind is one of PublicSourceKind's vocabulary, never a raw SourceType. A release's
+	// source.kind and a product's officialSources[].kind must never disagree about the
+	// same underlying source, and PublicSourceKind is the one place that mapping is
+	// written.
+	Kind     string
+	Official bool
+}
+
+// ReleaseEvidence is the excerpt and retrieval time of the evidence a release cites.
+// It carries only what a reader needs to judge the citation; the full domain.Evidence
+// record (raw/normalized values, discovery method, AI provenance) is a different
+// read, not one the public release response makes.
+type ReleaseEvidence struct {
+	Excerpt     string
+	RetrievedAt time.Time
+}
+
 // Release is a published fact: a version FirmScout asserts a vendor released, backed
 // by evidence.
 //
@@ -47,6 +74,18 @@ type Release struct {
 	SourceConfidence float64
 	ApprovedBy       string
 	CreatedAt        time.Time
+
+	// Source and Evidence are populated by the read path only, via a join through
+	// EvidenceID to evidence and sources -- PublishRelease and the INSERT statement
+	// never set them, the same nil/zero-until-read pattern Recommended documents above.
+	// Unlike Recommended, this is not modelling an honest absence: releases.evidence_id
+	// is NOT NULL with ON DELETE RESTRICT, so a published release is guaranteed to have
+	// real evidence and a real source behind it, and a Release value that came back
+	// from GetByID, LatestForProduct or ListForProduct always has these filled in. A
+	// Release built by hand (a test fixture, a value on its way to Insert) simply has
+	// not gone through that join yet, and leaves them zero.
+	Source   ReleaseSource
+	Evidence ReleaseEvidence
 }
 
 // Validate checks the invariants of a release. A release that fails this must never
@@ -89,6 +128,21 @@ func (r Release) Superseded() bool { return r.SupersededByReleaseID != "" }
 // responses. Withdrawn releases remain queryable by identifier and in history, but they
 // are not offered as the answer to "what is the latest version".
 func (r Release) Serveable() bool { return !r.Withdrawn }
+
+// EligibleForLatest reports whether a release may carry the latest-observed flag for
+// its product and channel.
+//
+// An advisory is excluded by type, not by policy written somewhere else: an advisory is
+// a document about vulnerabilities, so answering "what version should I be on?" with an
+// advisory identifier would be a wrong answer of exactly the kind this catalogue exists
+// to prevent. A withdrawn release is excluded for the same reason -- it is a fact that
+// was retracted, and pointing at it as current would repeat the retraction as advice.
+func (r Release) EligibleForLatest() bool {
+	if r.Withdrawn {
+		return false
+	}
+	return r.ReleaseType != ReleaseTypeAdvisory
+}
 
 // ReleaseProductMapping records that a release applies to a product or family, under
 // the given constraints.

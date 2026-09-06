@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Test Vendor Thing Releases (Atom)</title>
+  <link rel="self" href="https://example.test/releases.atom"/>
+  <entry>
+    <title>Test Vendor Thing 7.30 released</title>
+    <link rel="self" href="https://example.test/releases/7.30.atom"/>
+    <link rel="alternate" href="https://example.test/releases/7.30"/>
+    <id>https://example.test/releases/7.30</id>
+    <published>March 2026</published>
+  </entry>
+  <entry>
+    <title>Test Vendor Thing 7.31 nightly build</title>
+    <link rel="alternate" href="https://example.test/releases/7.31"/>
+    <id>https://example.test/releases/7.31</id>
+    <updated>2026-04-01T00:00:00Z</updated>
+  </entry>
+</feed>

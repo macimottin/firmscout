@@ -1,0 +1,51 @@
+{
+  "collectorId": "fortinet.psirt-advisories",
+  "note": "SYNTHETIC-TO-MEASURED-SHAPE. Hand-written to the structure measured from the live Fortinet PSIRT feed on 2026-09-05 (RSS 2.0, python-feedgen, item/title/link/description/guid/pubDate). It is not a recorded copy of the feed: the source's terms review is pending (ADR-0018), so re-fetching it to record a fixture would itself be collection. The three items are the vendor's real title/link/guid/pubDate for FG-IR-22-059, FG-IR-26-163 and FG-IR-26-158; the \u003cdescription\u003e content is a clearly-marked placeholder, not the vendor's advisory summary. See README.md in this directory.",
+  "candidates": [
+    {
+      "rawVersion": "FG-IR-22-059",
+      "normalizedVersion": "fg-ir-22-059",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2022-04-01"
+      },
+      "releaseType": "advisory",
+      "channel": "",
+      "applicability": {
+        "productHint": "fortinet-fortios"
+      },
+      "evidenceExcerptContains": "Vulnerability in OpenSSL library",
+      "confidenceAtLeast": 0.55
+    },
+    {
+      "rawVersion": "FG-IR-26-163",
+      "normalizedVersion": "fg-ir-26-163",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-08-12"
+      },
+      "releaseType": "advisory",
+      "channel": "",
+      "applicability": {
+        "productHint": "fortinet-fortios"
+      },
+      "evidenceExcerptContains": "HTTP/2 Bomb CVE-2026-49975",
+      "confidenceAtLeast": 0.55
+    },
+    {
+      "rawVersion": "FG-IR-26-158",
+      "normalizedVersion": "fg-ir-26-158",
+      "releaseDate": {
+        "precision": "exact_day",
+        "value": "2026-08-12"
+      },
+      "releaseType": "advisory",
+      "channel": "",
+      "applicability": {
+        "productHint": "fortinet-fortios"
+      },
+      "evidenceExcerptContains": "Broken access control in the RADIUS type admin group",
+      "confidenceAtLeast": 0.55
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ReleaseDate } from "@/components/release-date";
+import { ReleaseSourceEvidence } from "@/components/release-source-evidence";
 import { Unavailable } from "@/components/unavailable";
 import { Badge } from "@/components/ui/badge";
 import { getRelease, isNotFound } from "@/lib/api";
@@ -121,33 +122,7 @@ export default async function ReleasePage({ params }: ReleasePageProps) {
         <h2 id="evidence-heading" className="text-lg font-semibold text-ink-950">
           Source and evidence
         </h2>
-        <div className="mt-4 rounded-lg border border-ink-200 bg-white p-5 text-sm">
-          <p className="text-ink-600">
-            <a
-              href={release.source.url}
-              rel="noopener noreferrer"
-              target="_blank"
-              className="text-ink-800 underline-offset-2 hover:underline"
-            >
-              {release.source.url}
-            </a>{" "}
-            {release.source.official ? (
-              <Badge variant="success" className="ml-1">
-                Official
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="ml-1">
-                Unofficial
-              </Badge>
-            )}
-          </p>
-          <p className="mt-3 text-ink-500">
-            Retrieved {new Date(release.evidence.retrievedAt).toISOString().replace("T", " ").slice(0, 16)} UTC
-          </p>
-          <p className="mt-2 rounded bg-ink-50 p-3 font-mono text-xs text-ink-700">
-            &ldquo;{release.evidence.excerpt}&rdquo;
-          </p>
-        </div>
+        <ReleaseSourceEvidence source={release.source} evidence={release.evidence} />
       </section>
     </div>
   );

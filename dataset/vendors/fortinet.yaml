@@ -1,0 +1,29 @@
+# =============================================================================
+# Vendor: Fortinet
+# =============================================================================
+# Registry record, synchronised into the vendors table by `firmscout registry
+# sync`.
+#
+# legal_name and country_code are deliberately absent. This registration was
+# made from measurements of the vendor's own websites; neither field was
+# measured, and a corporate-registry fact nobody checked does not belong in a
+# file whose whole claim is that everything in it was verified.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Vendor
+
+metadata:
+  slug: fortinet
+
+spec:
+  name: Fortinet
+  homepage_url: https://www.fortinet.com
+  support_url: https://support.fortinet.com
+  security_advisory_url: https://www.fortiguard.com/psirt
+  notes: >-
+    Network security vendor. Registered as the pilot for "part of a vendor is
+    legitimately collectible and part is not": the firmware download portal
+    requires authentication and is out of scope for automated collection under
+    DATA_SOURCES.md, while the PSIRT advisory feed is public and unauthenticated.
+    Compliance is evaluated per source, never per vendor.
