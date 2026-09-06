@@ -8,7 +8,9 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,10 +28,62 @@ import (
 var version = "dev"
 
 func main() {
+	// One subcommand, and it exists for the container rather than for a person.
+	//
+	// The final image is gcr.io/distroless/static-debian12, which has no shell, no
+	// curl and no wget, so neither a Dockerfile HEALTHCHECK nor a Compose healthcheck
+	// has anything to exec. The binary is the only executable in the image, so it has
+	// to be able to probe itself. infrastructure/docker/docker-compose.yml has assumed
+	// this subcommand existed since before this file did; it did not, so the api
+	// container reported unhealthy forever while serving traffic perfectly.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if err := healthcheck(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "firmscout-api healthcheck: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "firmscout-api: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// healthcheck performs one local HTTP GET and reports the result as an exit code.
+//
+// It deliberately shares nothing with run(): no config load, no database pool, no
+// telemetry. A probe that needed the process's own dependencies to start would report
+// the health of a second copy of the service rather than of the one being probed, and
+// would fail for reasons — an unreachable database, a missing environment variable —
+// that say nothing about whether this process is answering requests.
+func healthcheck(args []string) error {
+	fs := flag.NewFlagSet("healthcheck", flag.ContinueOnError)
+	url := fs.String("url", "http://127.0.0.1:8080/healthz", "the endpoint to probe")
+	timeout := fs.Duration("timeout", 3*time.Second, "how long to wait for a response")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, *url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Drain before closing so the connection can be reused; a probe that leaks a
+	// connection every ten seconds is a slow leak in a long-lived container.
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s returned %s", *url, resp.Status)
+	}
+	return nil
 }
 
 func run() error {

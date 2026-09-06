@@ -137,16 +137,14 @@ services:
     ports:
       - "${API_PORT:-8080}:8080"
     healthcheck:
-      # gcr.io/distroless/static-debian12 (go.Dockerfile's final stage) has
-      # no shell and no curl/wget -- see the HEALTHCHECK note in
-      # go.Dockerfile. This assumes apps/api implements a `healthcheck`
-      # subcommand that performs a local, dependency-free HTTP GET against
-      # its own /healthz and exits 0/non-zero accordingly, so Compose can
-      # probe it with a plain exec-form CMD (no shell required). This is an
-      # assumption about a CLI surface that does not exist yet -- if
-      # apps/api ships without it, replace this healthcheck with `disable:
-      # true` and rely on the host-side `curl -f http://localhost:8080/healthz`
-      # smoke check in README.md / definition-of-done.md instead.
+      # gcr.io/distroless/static-debian12 (go.Dockerfile's final stage) has no shell
+      # and no curl/wget, so the binary has to be able to probe itself. `apps/api`
+      # implements the `healthcheck` subcommand this exec-form CMD calls: one local
+      # HTTP GET, exit 0 on 200 and non-zero otherwise, sharing nothing with the
+      # server's own startup path. It was an assumption when this file was written
+      # and went unimplemented, so the container reported unhealthy forever while
+      # serving traffic perfectly; it exists now and is exercised by
+      # TestHealthcheckSubcommand.
       test: ["CMD", "/firmscout", "healthcheck", "--url=http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
@@ -162,11 +160,22 @@ services:
 
   # -------------------------------------------------------------------------
   # Scheduler loop + job runner (blueprint §18). Same image family as `api`,
-  # different BINARY and no published API port -- ASSUMPTION: worker exposes
-  # a small internal HTTP server (port 9090) for /metrics and /healthz only,
-  # since docs/architecture/observability.md requires Prometheus to scrape
-  # "the api and worker /metrics endpoints" and this brief requires a worker
-  # healthcheck. apps/worker/main.go does not exist yet.
+  # different BINARY and no published port.
+  #
+  # KNOWN GAP, stated rather than faked: apps/worker serves NO HTTP. This file
+  # used to declare FIRMSCOUT_METRICS_ADDR, `expose: 9090` and a healthcheck
+  # probing /healthz on that port, all of it written when apps/worker/main.go did
+  # not exist. The worker never read that variable and never opened a socket, so
+  # the probe could only ever fail and the container could only ever report
+  # unhealthy. They are removed rather than left as aspiration.
+  #
+  # Two things follow, and both are real: the worker has no container-level
+  # liveness signal (Compose reports it running, not healthy), and
+  # infrastructure/observability/prometheus/prometheus.yml's firmscout-worker job
+  # scrapes worker:9090, which nothing answers -- that target will be down for as
+  # long as this gap exists. docs/architecture/observability.md's claim that
+  # Prometheus scrapes "the api and worker /metrics endpoints" is true of the api
+  # and not yet of the worker.
   # -------------------------------------------------------------------------
   worker:
     build:
@@ -187,22 +196,11 @@ services:
       - .env
     environment:
       FIRMSCOUT_DATABASE_URL: postgres://${POSTGRES_USER:-firmscout}:${POSTGRES_PASSWORD:-firmscout-dev-only-not-a-real-secret}@postgres:5432/${POSTGRES_DB:-firmscout}?sslmode=disable
-      FIRMSCOUT_METRICS_ADDR: ":9090"
       FIRMSCOUT_LOG_LEVEL: ${FIRMSCOUT_LOG_LEVEL:-info}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: firmscout-worker
       OTEL_RESOURCE_ATTRIBUTES: deployment.environment.name=${FIRMSCOUT_ENV:-local},service.namespace=firmscout
-    expose:
-      - "9090"
-    healthcheck:
-      # Same distroless caveat and same `healthcheck` subcommand assumption
-      # as the `api` service above, aimed at the worker's own /healthz.
-      test: ["CMD", "/firmscout", "healthcheck", "--url=http://127.0.0.1:9090/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
     networks:
       - firmscout
     deploy:
