@@ -24,6 +24,53 @@ const (
 	SourceTypeManual              SourceType = "manual"
 )
 
+// Public source kinds: the small vocabulary a release's source and a product's
+// officialSources render, independent of which of the twelve SourceType values a
+// source is actually collected as. It exists because the public API commits to a
+// stable, small set of shapes a client can switch on, while SourceType is free to grow
+// new collector-specific values without that becoming a breaking API change.
+const (
+	PublicKindHTML    = "html"
+	PublicKindText    = "text"
+	PublicKindJSON    = "json"
+	PublicKindXML     = "xml"
+	PublicKindPDF     = "pdf"
+	PublicKindRSSAtom = "rss_atom"
+)
+
+// PublicSourceKind maps a SourceType onto the public vocabulary above.
+//
+// This is the one place that mapping is written. A release's ReleaseSource.Kind and a
+// product's officialSources[].Kind must never disagree about what "kind" means for the
+// same underlying source, and the only way to guarantee that is for both call sites to
+// go through this function rather than each keeping their own CASE-like logic.
+//
+// The mapping is a judgement call, not a fact read off the schema: rest_api,
+// graphql_api, json_endpoint and github_releases all answer with JSON bodies, so they
+// map to "json"; sitemap is XML by definition; download_portal and
+// authenticated_portal are HTML pages a person reads, same as html_page; manual has no
+// real document behind it at all, and "text" is the vaguest of the six kinds rather
+// than a specific structure this source does not have. An unrecognised or empty
+// SourceType (a NULL evidence.source_type with no source row to fall back on) gets the
+// same "text" default, for the same reason: guessing a specific structure would be
+// inventing data ADR-0017's spirit does not allow.
+func PublicSourceKind(t SourceType) string {
+	switch t {
+	case SourceTypeRESTAPI, SourceTypeGraphQLAPI, SourceTypeJSONEndpoint, SourceTypeGitHubReleases:
+		return PublicKindJSON
+	case SourceTypeRSSAtom:
+		return PublicKindRSSAtom
+	case SourceTypeXMLFeed, SourceTypeSitemap:
+		return PublicKindXML
+	case SourceTypeHTMLPage, SourceTypeDownloadPortal, SourceTypeAuthenticatedPortal:
+		return PublicKindHTML
+	case SourceTypePDFReleaseNotes:
+		return PublicKindPDF
+	default:
+		return PublicKindText
+	}
+}
+
 // ValidSourceType reports whether t is a declared source type.
 func ValidSourceType(t SourceType) bool {
 	switch t {

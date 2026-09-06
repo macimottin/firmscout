@@ -38,6 +38,12 @@ a decision with no downside has not been examined.
 | [0017](0017-version-strings-and-date-precision.md) | Opaque version strings, derived "latest," and explicit date precision | Accepted | Real vendor versions are not semver, and a day is never invented | no |
 | [0018](0018-source-compliance-policy.md) | Source compliance is a first-class field, evaluated before collection | Accepted | Robots and terms status gate dispatch; Dell is registered but disabled | **yes** |
 | [0019](0019-public-domain-shape.md) | The API is served from `api.firmscout.dev`, keeping the `/api/v1` path prefix | Accepted | A base URL consumers hardcode has to be able to move; apex cookies must not ride on API requests | no |
+| [0020](0020-multi-source-conflict-detection.md) | Multi-source conflict is a recorded finding, never an auto-resolved guess | Accepted | Observations per source, an authority ladder that only ever demotes, and no same-tier tie-break | no |
+| [0021](0021-asserted-reviewer-identity.md) | Review decisions record an asserted, unauthenticated actor | Accepted | There is no login; the audit trail says so in a column rather than pretending otherwise | no |
+| [0022](0022-canonical-problem-types.md) | One canonical problem-type catalogue, taken from api.md | Accepted | Three URIs renamed and two added while the API is still unpublished | no |
+| [0023](0023-queue-defers-rather-than-drains.md) | A concurrent dequeue defers work; it does not drain the queue | Accepted | `SKIP LOCKED` promises no duplication and no loss, never drainage; the test asserted drainage and was wrong | no |
+| [0024](0024-device-first-catalogue.md) | A hardware model is a Product, and per-model firmware applicability is an explicit unknown | Accepted | A fleet searches by model number; a family claims a shared image file, never a shared version, and the gap is stated rather than guessed | no |
+| [0025](0025-catalogue-snapshots-in-git.md) | The catalogue's observed facts ship in Git as an NDJSON snapshot | Accepted | A clone is useful offline in three commands; facts are referenced by slug so the file is portable, and CC BY 4.0 travels inside it | **yes** |
 
 ## Decisions requiring qualified legal review
 

@@ -1,0 +1,30 @@
+# =============================================================================
+# Vendor: Dell
+# =============================================================================
+# Registered so that the refusal recorded in dataset/sources/dell/catalog.yaml is
+# visible in the registry rather than described only in prose. A compliance block
+# that exists only in a document is not auditable; a disabled row is.
+#
+# This file deliberately carries the minimum. Every other vendor record in this
+# dataset states facts taken from the vendor's own site, and the one page of
+# Dell's site this pass is permitted to read is robots.txt -- which is the point
+# of the source entry. Nothing here is inferred from the catalogue, because the
+# catalogue is the thing this project refuses to fetch.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Vendor
+
+metadata:
+  slug: dell
+
+spec:
+  name: Dell
+  homepage_url: https://www.dell.com
+  country_code: US
+  notes: >-
+    Registered for one reason: to hold the disabled source record for
+    downloads.dell.com/catalog/Catalog.xml.gz, whose robots.txt forbids
+    collection. See DATA_SOURCES.md and ADR-0018. No Dell product is registered,
+    because establishing which products that catalogue covers would require
+    reading the catalogue, and reading it is exactly what robots.txt disallows.

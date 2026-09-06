@@ -1,0 +1,64 @@
+# =============================================================================
+# Device: MikroTik RB1100AHx2
+# =============================================================================
+# See ADR-0024 and hap-ax3.yaml for the standing note on device documents.
+#
+# Provenance:
+#   GET https://mikrotik.com/product/RB1100AHx2
+#     fetched 2026-09-06T01:19:03Z, HTTP 200, 343520 bytes.
+#
+# Verbatim excerpts, whitespace-collapsed:
+#   name             <h1 class="font-bold mtk-h4 md:mtk-h3 lg:mtk-h1">RB1100AHx2
+#   model_identifier Product code </span> <span class="basis-1/2 font-light
+#                    break-words"> RB1100AHx2
+#   family           Architecture </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> PPC
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   runs             Operating System </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> RouterOS
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   category         breadcrumb: Home / Hardware / Ethernet routers
+#
+# Also measured and not recorded: Size of RAM 2 GB, Storage size 128 MB.
+#
+# A PowerPC model, badged "Discontinued", still offered RouterOS 7.24.2 built
+# for ppc (https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-ppc.npk)
+# plus the per-SoC RouterBOOT firmware
+# https://download.mikrotik.com/routeros/7.24.2/p2020-7.24.2.fwf. It is
+# registered because it is the only PPC device in this dataset and because it,
+# with RB433, is the direct measurement refuting the idea that older hardware is
+# held on the 6.49.x line.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: mikrotik-rb1100ahx2
+  vendor: mikrotik
+  family: ppc
+
+spec:
+  name: RB1100AHx2
+  model_identifier: RB1100AHx2
+  lifecycle_status: unknown
+
+  category_slugs:
+    - network-devices
+    - routers
+
+  aliases:
+    - alias: RB1100AHx2
+      kind: model_number
+      source_note: >-
+        The "Product code" specification on
+        https://mikrotik.com/product/RB1100AHx2, fetched 2026-09-06T01:19:03Z.
+
+  runs:
+    - product: mikrotik-routeros
+      kind: runs_os
+      source_note: >-
+        https://mikrotik.com/product/RB1100AHx2, fetched 2026-09-06T01:19:03Z:
+        Operating System "RouterOS". The same page links the device-resolved
+        image
+        https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-ppc.npk

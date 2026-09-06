@@ -37,7 +37,7 @@ The nine bootstrap steps run in the order the objective lists them, ending in th
 
 ## Failure modes
 
-- The agent proposes a source that is later found to have a restrictive `robots.txt` or terms (the Dell case, §3.6) — the source is registered with `robots_policy_status = 'disallowed'` and `enabled = false` rather than rejected outright, so the evidence trail survives even though collection does not proceed.
+- The agent proposes a source that is later found to have a restrictive `robots.txt` or terms (the Dell case, §3.6) — the source is registered with `robots_policy_status = 'disallowed'` and `enabled = false` rather than rejected outright, so the evidence trail survives even though collection does not proceed. This is no longer only a described posture: `dataset/vendors/dell.yaml` and `dataset/sources/dell/catalog.yaml` exist, carry `robots_policy_status: disallowed`, `health: disabled`, `enabled: false`, and quote the four measured lines of `downloads.dell.com/robots.txt` that produce that verdict. `firmscout registry sync` names robots.txt as one of the reasons the row will not be checked.
 - Historical extraction finds no evidence for a claimed release — such candidates fail gate 7 (evidence retained) in §16 and are rejected, not silently dropped, so a maintainer can see what was attempted.
 - A maintainer approves a registry proposal but the subsequent `firmscout registry sync` fails schema validation — the PR is already merged in Git, so the fix is a follow-up commit, not a database rollback (§3.3).
 
@@ -51,6 +51,13 @@ The nine bootstrap steps run in the order the objective lists them, ending in th
 
 **Not implemented.** This diagram documents an intended design.
 
-No discovery agent exists. The registry is authored by hand in `dataset/`.
+No discovery agent exists. The registry is authored by hand in `dataset/`, and the compliance verdicts in it were measured by a human with `curl`, not proposed by an agent.
+
+What *is* implemented is the shape the agent would have to write into, and the refusal that guards it:
+
+- `dataset/vendors/*.yaml`, `dataset/sources/*/*.yaml` — five vendors, six sources, none enabled (`go run ./apps/cli registry validate` → *Registry is valid: 5 vendor(s), 7 category(ies), 0 family(ies), 2 product(s), 6 source(s). 0 of 6 source(s) are currently collectable*)
+- `internal/domain/source.go` — `Dispatchable`, which is what makes "registered" and "collected" different states
+- `internal/application/registry.go` — `SyncRegistry`, which reports every source it will *not* check and why, one reason at a time
+- `packages/schemas/*.schema.json` and `scripts/check-schemas.py` — the shape an authored row must satisfy before it is loaded
 
 See [the architecture consistency report](../architecture/consistency-report.md) for what is verified by execution and what is not.

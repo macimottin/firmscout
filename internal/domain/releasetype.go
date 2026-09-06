@@ -23,6 +23,13 @@ const (
 	ReleaseTypeSecurityUpdate      ReleaseType = "security_update"
 	ReleaseTypeDocumentationOnly   ReleaseType = "documentation_only"
 	ReleaseTypeUnknown             ReleaseType = "unknown"
+
+	// ReleaseTypeAdvisory is a vendor security advisory document. It is not an installable
+	// artifact, which is what separates it from ReleaseTypeSecurityUpdate: a security
+	// update is a release that fixes a vulnerability, an advisory is the vendor's statement
+	// that one exists. Collapsing the two would make the vocabulary unable to express the
+	// difference on the first day a vendor publishes both.
+	ReleaseTypeAdvisory ReleaseType = "advisory"
 )
 
 var releaseTypeNames = map[ReleaseType]string{
@@ -37,6 +44,7 @@ var releaseTypeNames = map[ReleaseType]string{
 	ReleaseTypeManagementPlatform:  "Management platform",
 	ReleaseTypeSecurityUpdate:      "Security update",
 	ReleaseTypeDocumentationOnly:   "Documentation-only update",
+	ReleaseTypeAdvisory:            "Security advisory",
 	ReleaseTypeUnknown:             "Unknown",
 }
 

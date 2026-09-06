@@ -5,7 +5,7 @@
   Provenance and trimming notes: see README.md in this directory.
 
   The original response is roughly 409 KB and contains 46 changelog entries.
-  This file keeps three of them, in the markup shape the page actually uses,
+  This file keeps four of them, in the markup shape the page actually uses,
   plus enough surrounding page furniture (navigation, a <style>, a <script>, a
   collapsible entry body, a footer) that the strip list and the section
   selector are genuinely exercised rather than trivially satisfied.
@@ -79,6 +79,34 @@
   </div>
   <div class="changelog-body hidden" x-data="{ expanded: false }">
     <ul><li>*) route - fixed BGP session flap;</li></ul>
+  </div>
+
+  <!--
+    A REAL dual-badge entry, copied from the live page on 2026-09-06.
+
+    MikroTik marks its newest v6 releases with TWO channel badges: "Stable"
+    (bg-blue) and "Long-term" (bg-green), in that document order, because those
+    releases are both the long-term line and the stable of the v6 line. The
+    original excerpt contained no entry of this shape, and that omission is why
+    the engine's silent first-match-wins went unnoticed until the catalogue had
+    already recorded four long-term releases as stable.
+
+    It stays here so a config that reads the badge cannot pass its tests, and so
+    a future refresh of this fixture has to look at the case on purpose.
+  -->
+  <div class="flex items-center gap-4 py-3 changelog-header" wire:id="b3c4d5e6">
+    <i class="ti ti-chevron-down text-lg"></i>
+    <div class="grow"><div class="flex items-center justify-between"><div class="flex gap-4 items-center">
+      <span class="mtk-text-sm font-bold min-w-20"> 6.49.21 </span>
+      <div class="flex gap-1 text-[10px] font-bold text-white uppercase leading-none">
+        <div class="rounded-[4px] bg-blue p-1"> Stable </div>
+        <div class="rounded-[4px] bg-green p-1"> Long-term </div>
+      </div>
+      <span class="mtk-text-sm text-gray-500"> 2026-09-03 </span>
+    </div></div></div>
+  </div>
+  <div class="changelog-body hidden" x-data="{ expanded: false }">
+    <ul><li>*) security - fixed vulnerability in the v6 long-term line;</li></ul>
   </div>
 
 </main>

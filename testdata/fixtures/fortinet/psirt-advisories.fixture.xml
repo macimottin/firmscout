@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     version="2.0">
+  <channel>
+    <title>Fortiguard Threat Intelligence — PSIRT advisories</title>
+    <link>https://www.fortiguard.com/psirt</link>
+    <description>Placeholder. The vendor's channel description is not reproduced.</description>
+    <docs>http://www.rssboard.org/rss-specification</docs>
+    <generator>python-feedgen</generator>
+    <lastBuildDate>Sat, 05 Sep 2026 15:45:08 -0700</lastBuildDate>
+    <pubDate>Sat, 05 Sep 2026 15:45:08 -0700</pubDate>
+    <item>
+      <title>Vulnerability in OpenSSL library</title>
+      <link>https://www.fortiguard.com/psirt/FG-IR-22-059</link>
+      <description><![CDATA[<p>Placeholder — the vendor's advisory summary is not reproduced in this fixture.</p>]]></description>
+      <guid isPermaLink="true">https://www.fortiguard.com/psirt/FG-IR-22-059</guid>
+      <pubDate>Fri, 01 Apr 2022 00:00:00 -0700</pubDate>
+    </item>
+    <item>
+      <title>HTTP/2 Bomb CVE-2026-49975</title>
+      <link>https://www.fortiguard.com/psirt/FG-IR-26-163</link>
+      <description><![CDATA[<p>Placeholder — the vendor's advisory summary is not reproduced in this fixture.</p>]]></description>
+      <guid isPermaLink="true">https://www.fortiguard.com/psirt/FG-IR-26-163</guid>
+      <pubDate>Wed, 12 Aug 2026 00:00:00 -0700</pubDate>
+    </item>
+    <item>
+      <title>Broken access control in the RADIUS type admin group</title>
+      <link>https://www.fortiguard.com/psirt/FG-IR-26-158</link>
+      <description><![CDATA[<p>Placeholder — the vendor's advisory summary is not reproduced in this fixture.</p>]]></description>
+      <guid isPermaLink="true">https://www.fortiguard.com/psirt/FG-IR-26-158</guid>
+      <pubDate>Wed, 12 Aug 2026 00:00:00 -0700</pubDate>
+    </item>
+  </channel>
+</rss>

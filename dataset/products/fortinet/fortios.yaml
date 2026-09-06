@@ -1,0 +1,48 @@
+# =============================================================================
+# Product: Fortinet FortiOS
+# =============================================================================
+# FortiOS is registered so the Fortinet vendor record has a catalogue entry for
+# its PSIRT advisories to be matched against. No FortiOS release has been
+# observed by FirmScout: the firmware download portal requires authentication
+# (DATA_SOURCES.md), so nothing in this repository publishes a FortiOS version.
+#
+# What the PSIRT feed can and cannot say is spelled out in
+# dataset/sources/fortinet/psirt-advisories.yaml: the feed states that an
+# advisory exists and when it was published, and does NOT state which products
+# it affects. Every candidate from that source therefore reaches a human.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: fortinet-fortios
+  vendor: fortinet
+
+spec:
+  name: FortiOS
+
+  # embedded_os for the same reason RouterOS is: FortiOS is the operating system
+  # of the appliance, not a component firmware image.
+  default_release_type: embedded_os
+
+  lifecycle_status: active
+
+  # FortiOS runs on internet-facing security appliances and Fortinet operates a
+  # PSIRT that publishes advisories against it. This flag raises the review
+  # priority of anything touching this product; it does not assert a CVE.
+  security_critical: true
+
+  description: >-
+    Operating system for Fortinet's FortiGate security appliances. Registered
+    for advisory matching; FirmScout observes no FortiOS release, because the
+    firmware download portal requires authentication and is out of scope for
+    automated collection.
+
+  aliases:
+    - alias: FortiOS
+      kind: marketing_name
+      source_note: The vendor's own product name, as used on fortinet.com.
+
+  category_slugs:
+    - firewalls

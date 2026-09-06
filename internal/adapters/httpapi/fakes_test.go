@@ -2,14 +2,17 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/macimottin/firmscout/internal/application"
+	"github.com/macimottin/firmscout/internal/application/apptest"
 	"github.com/macimottin/firmscout/internal/domain"
 )
 
@@ -18,7 +21,9 @@ import (
 // bytes of the JSON -- and every one of them runs in microseconds against httptest.
 //
 // Each fake is mutex-guarded because the after-response worker touches some of them
-// from a second goroutine, and the suite runs under -race.
+// from a second goroutine. The guards are what make that safe; they are also what a
+// -race build would check, and this machine has no C compiler, so no run of this suite
+// has been under the race detector. Do not read the guards as evidence that one was.
 
 // ---------------------------------------------------------------------------
 // SummaryRepository
@@ -82,22 +87,41 @@ func (f *fakeSummaries) ListByVendor(context.Context, string, int, string) ([]ap
 type fakeVendors struct {
 	mu     sync.Mutex
 	bySlug map[string]domain.Vendor
+	byID   map[string]domain.Vendor
 	list   []domain.Vendor
 	next   string
 	err    error
 }
 
-func newFakeVendors() *fakeVendors { return &fakeVendors{bySlug: map[string]domain.Vendor{}} }
+func newFakeVendors() *fakeVendors {
+	return &fakeVendors{bySlug: map[string]domain.Vendor{}, byID: map[string]domain.Vendor{}}
+}
 
 func (f *fakeVendors) put(v domain.Vendor) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.bySlug[v.Slug] = v
+	if v.ID != "" {
+		f.byID[v.ID] = v
+	}
 	f.list = append(f.list, v)
 }
 
-func (f *fakeVendors) GetByID(context.Context, string) (domain.Vendor, error) {
-	return domain.Vendor{}, domain.ErrNotFound
+// GetByID resolves a vendor the way the review queue needs it to: a queue row carries
+// review_items.vendor_id, and naming the vendor is what makes the row recognisable to a
+// human. A vendor seeded without an id stays unresolvable, which is the ON DELETE SET
+// NULL case the presenter has to survive.
+func (f *fakeVendors) GetByID(_ context.Context, id string) (domain.Vendor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return domain.Vendor{}, f.err
+	}
+	v, ok := f.byID[id]
+	if !ok {
+		return domain.Vendor{}, domain.ErrNotFound
+	}
+	return v, nil
 }
 
 func (f *fakeVendors) GetBySlug(_ context.Context, slug string) (domain.Vendor, error) {
@@ -139,6 +163,12 @@ type fakeReleases struct {
 	latest    map[string]domain.Release
 	next      string
 	err       error
+
+	// lastOpts records what the handler asked for. Windowing is a fact about the
+	// query, not about the page that comes back (application.ReleaseListOptions), so
+	// a test that only inspected the response could not tell a repository that was
+	// handed a window from one that was handed none and returned few rows anyway.
+	lastOpts application.ReleaseListOptions
 }
 
 func newFakeReleases() *fakeReleases {
@@ -183,33 +213,100 @@ func (f *fakeReleases) FindDuplicate(context.Context, string, string, string) (s
 	return "", nil
 }
 
+// ProductRefForRelease reverse-scans byProduct for the release id and returns the
+// productID it was put() under as both Slug and Name -- this fake has no separate
+// product registry to resolve a real name from, and a test that cares can put() under
+// a realistic-looking id and assert on that.
+func (f *fakeReleases) ProductRefForRelease(_ context.Context, id string) (application.ReleaseProductRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for productID, rels := range f.byProduct {
+		for _, r := range rels {
+			if r.ID == id {
+				return application.ReleaseProductRef{Slug: productID, Name: productID}, nil
+			}
+		}
+	}
+	return application.ReleaseProductRef{}, domain.ErrNotFound
+}
+
+// LatestForProduct honours the port's "an empty channel means ANY channel" rule (see
+// application.ReleaseRepository.LatestForProduct) rather than treating "" as a channel
+// name of its own.
+//
+// The map is keyed productID|channel, so an exact hit wins when the caller named a
+// channel. When the caller named none, this falls back to any channel registered for
+// that product, folded with domain.LatestComparison so the fake picks the release the
+// adapter's ORDER BY would -- release date, then first-observed time, never the version
+// string. Without the fallback, every handler test that registered a channelled release
+// and then asked GET /products/{slug}/latest with no ?channel got a 404 from the fake
+// and had to be written around it, which is precisely how the endpoint's own documented
+// default call went untested through the defect that broke it in production SQL.
 func (f *fakeReleases) LatestForProduct(_ context.Context, productID, channel string) (domain.Release, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return domain.Release{}, f.err
 	}
-	r, ok := f.latest[productID+"|"+channel]
-	if !ok {
+	if r, ok := f.latest[productID+"|"+channel]; ok {
+		if !r.Serveable() {
+			return domain.Release{}, domain.ErrNotFound
+		}
+		return r, nil
+	}
+	if channel != "" {
 		return domain.Release{}, domain.ErrNotFound
 	}
-	return r, nil
+	var best domain.Release
+	found := false
+	for key, r := range f.latest {
+		if !strings.HasPrefix(key, productID+"|") || !r.Serveable() {
+			continue
+		}
+		if !found || domain.LatestComparison(r, best) > 0 {
+			best, found = r, true
+		}
+	}
+	if !found {
+		return domain.Release{}, domain.ErrNotFound
+	}
+	return best, nil
 }
 
-func (f *fakeReleases) ListForProduct(_ context.Context, productID string, limit int, _ string) ([]domain.Release, string, error) {
+func (f *fakeReleases) ListForProduct(_ context.Context, productID string, opts application.ReleaseListOptions) ([]domain.Release, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lastOpts = opts
 	if f.err != nil {
 		return nil, "", f.err
 	}
 	// Returned in insertion order on purpose. The handler is responsible for the
 	// documented ordering, and a fake that pre-sorted would hide a handler that did
 	// not order at all.
-	out := append([]domain.Release(nil), f.byProduct[productID]...)
-	if limit < len(out) {
-		out = out[:limit]
+	//
+	// The window, by contrast, is applied here, because the real adapter applies it in
+	// SQL: a fake that ignored Since would let a reverted window still pass a test
+	// that only counted rows.
+	out := make([]domain.Release, 0, len(f.byProduct[productID]))
+	for _, rel := range f.byProduct[productID] {
+		if insideWindow(rel, opts.Since) {
+			out = append(out, rel)
+		}
+	}
+	if opts.Limit > 0 && opts.Limit < len(out) {
+		out = out[:opts.Limit]
 	}
 	return out, f.next, nil
+}
+
+// insideWindow delegates to application.WithinHistoryWindow rather than restating the
+// rule. It used to restate it, and drifted: it kept comparing the stored anchor after the
+// adapter had moved to the end of the period, so every windowing test in this package
+// asserted the bug rather than the fix, and reinstating the anchor comparison in SQL
+// would have left the whole suite green. A double that reimplements the thing under test
+// can only agree with a wrong implementation by luck.
+func insideWindow(rel domain.Release, since time.Time) bool {
+	return application.WithinHistoryWindow(rel.ReleaseDate, rel.FirstObservedAt, since)
 }
 
 func (f *fakeReleases) ClearLatestFlag(context.Context, string, string) error { return nil }
@@ -325,6 +422,20 @@ func (f *fakeEvents) names() []string {
 	return out
 }
 
+// withName returns every event published under one name, so a test can assert on what an
+// event carries and not only that it happened.
+func (f *fakeEvents) withName(name domain.EventName) []domain.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []domain.Event
+	for _, e := range f.events {
+		if e.Name == name {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Clock and IDs
 // ---------------------------------------------------------------------------
@@ -371,6 +482,10 @@ type harness struct {
 	usage     *fakeUsage
 	events    *fakeEvents
 	clock     *fixedClock
+
+	// reviewFakes is non-nil only for a harness built with wireReviewAPI or
+	// enableReviewAPI. It is how a test seeds the queue the internal surface serves.
+	reviewFakes *reviewFixtures
 }
 
 // newHarness builds a server over fakes with rate limiting disabled by default, so a
@@ -431,3 +546,127 @@ func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false 
 func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
 func (discardHandler) WithAttrs([]slog.Attr) slog.Handler        { return discardHandler{} }
 func (discardHandler) WithGroup(string) slog.Handler             { return discardHandler{} }
+
+// ---------------------------------------------------------------------------
+// the internal review surface
+// ---------------------------------------------------------------------------
+
+// reviewFixtures holds the in-memory application fakes the review use cases run over.
+//
+// The three review dependencies on Deps are concrete use-case types, not interfaces, so
+// there is nothing to substitute at the HTTP boundary: a test either builds the real
+// ListReviewQueue, GetReviewItem and DecideReviewItem or it tests nothing. That is the
+// better bargain anyway -- an accept has to actually publish through PublishRelease and
+// actually write the audit row for these tests to mean what they claim -- and
+// internal/application/apptest already provides every port they need.
+type reviewFixtures struct {
+	reviews    *apptest.Reviews
+	candidates *apptest.Candidates
+	evidence   *apptest.EvidenceStore
+	sources    *apptest.Sources
+	products   *apptest.Products
+	conflicts  *apptest.Conflicts
+	audit      *apptest.Audit
+	releases   *apptest.Releases
+	events     *apptest.Events
+	ids        *apptest.IDGen
+}
+
+func newReviewFixtures() *reviewFixtures {
+	return &reviewFixtures{
+		reviews:    &apptest.Reviews{},
+		candidates: apptest.NewCandidates(),
+		evidence:   apptest.NewEvidenceStore(),
+		sources:    apptest.NewSources(),
+		products:   apptest.NewProducts(),
+		conflicts:  apptest.NewConflicts(),
+		audit:      apptest.NewAudit(),
+		releases:   apptest.NewReleases(),
+		events:     &apptest.Events{},
+		ids:        apptest.NewIDGen(),
+	}
+}
+
+func (f *reviewFixtures) queryDeps(vendors application.VendorRepository, clock application.Clock) application.ReviewQueryDeps {
+	return application.ReviewQueryDeps{
+		Reviews:    f.reviews,
+		Candidates: f.candidates,
+		Evidence:   f.evidence,
+		Sources:    f.sources,
+		Products:   f.products,
+		Vendors:    vendors,
+		Conflicts:  f.conflicts,
+		Audit:      f.audit,
+		Clock:      clock,
+	}
+}
+
+func (f *reviewFixtures) decideDeps(clock application.Clock) application.ReviewDeps {
+	ingest := application.IngestDeps{
+		Sources:    f.sources,
+		Products:   f.products,
+		Candidates: f.candidates,
+		Releases:   f.releases,
+		Evidence:   f.evidence,
+		Reviews:    f.reviews,
+		Conflicts:  f.conflicts,
+		Audit:      f.audit,
+		Events:     f.events,
+		UoW:        &apptest.UnitOfWork{},
+		Clock:      clock,
+		IDs:        f.ids,
+	}
+	return application.ReviewDeps{
+		Reviews:    f.reviews,
+		Candidates: f.candidates,
+		Conflicts:  f.conflicts,
+		Audit:      f.audit,
+		Publisher:  application.NewPublishRelease(ingest),
+		Events:     f.events,
+		UoW:        &apptest.UnitOfWork{},
+		Clock:      clock,
+		IDs:        f.ids,
+	}
+}
+
+// cursorRejectingReviews refuses any cursor, the way the PostgreSQL adapter refuses one
+// it did not mint. It exists because the in-memory queue fake does not paginate -- a fake
+// that reimplemented keyset cursors would be testing the fake -- and the error mapping
+// for a bad cursor still has to be exercised.
+type cursorRejectingReviews struct {
+	application.ReviewRepository
+}
+
+func (r cursorRejectingReviews) List(_ context.Context, f application.ReviewQueueFilter) ([]application.ReviewItem, string, error) {
+	if f.Cursor != "" {
+		return nil, "", fmt.Errorf("review.List.cursor: %w", domain.ErrValidation)
+	}
+	return nil, "", nil
+}
+
+// enableReviewAPIRejectingCursors is enableReviewAPI with a queue whose repository
+// refuses cursors.
+func enableReviewAPIRejectingCursors(d *Deps, h *harness) {
+	enableReviewAPI(d, h)
+	deps := h.reviewFakes.queryDeps(h.vendors, h.clock)
+	deps.Reviews = cursorRejectingReviews{h.reviewFakes.reviews}
+	d.ReviewQueue = application.NewListReviewQueue(deps)
+}
+
+// wireReviewAPI attaches the three review use cases to Deps without touching
+// ReviewAPIEnabled. It is separate from enableReviewAPI so a test can prove that the
+// dependencies alone are not enough -- which is half of ADR-0021's double switch.
+func wireReviewAPI(d *Deps, h *harness) {
+	f := newReviewFixtures()
+	h.reviewFakes = f
+	d.ReviewQueue = application.NewListReviewQueue(f.queryDeps(h.vendors, h.clock))
+	d.ReviewItems = application.NewGetReviewItem(f.queryDeps(h.vendors, h.clock))
+	d.Review = application.NewDecideReviewItem(f.decideDeps(h.clock))
+}
+
+// enableReviewAPI turns both of ADR-0021's switches on: the three dependencies and the
+// flag. Only a harness built with this customiser has any /internal route at all.
+func enableReviewAPI(d *Deps, h *harness) {
+	wireReviewAPI(d, h)
+	d.ReviewAPIEnabled = true
+}

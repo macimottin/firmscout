@@ -301,6 +301,42 @@ func (r *CandidateRepo) RecordValidation(ctx context.Context, candidateID string
 	})
 }
 
+// ListValidationResults returns the recorded verdict of every gate that ran for a
+// candidate, in gate order.
+//
+// RecordValidation has always written these rows and nothing had ever read them back,
+// which meant a reviewer could see that a candidate needed review but not which gate
+// said so. A review queue without the failing gate is a queue nobody can act on.
+func (r *CandidateRepo) ListValidationResults(ctx context.Context, candidateID string) ([]domain.GateResult, error) {
+	rows, err := r.db.q(ctx).Query(ctx,
+		`SELECT gate, gate_order, outcome, detail, evaluated_by, evaluated_at
+           FROM validation_results
+          WHERE candidate_id = $1
+          ORDER BY gate_order`, candidateID)
+	if err != nil {
+		return nil, wrap("candidate.ListValidationResults", err)
+	}
+	defer rows.Close()
+
+	var out []domain.GateResult
+	for rows.Next() {
+		var (
+			res     domain.GateResult
+			gate    string
+			outcome string
+			detail  *string
+		)
+		if err := rows.Scan(&gate, &res.Order, &outcome, &detail, &res.EvaluatedBy, &res.EvaluatedAt); err != nil {
+			return nil, wrap("candidate.ListValidationResults.scan", err)
+		}
+		res.Gate = domain.ValidationGate(gate)
+		res.Outcome = domain.GateOutcome(outcome)
+		res.Detail = str(detail)
+		out = append(out, res)
+	}
+	return out, wrap("candidate.ListValidationResults.rows", rows.Err())
+}
+
 // SetResolvedProduct records the product a candidate was matched to.
 //
 // The match is written back because publication must act on a settled fact: resolving

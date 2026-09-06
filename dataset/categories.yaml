@@ -89,3 +89,48 @@ spec:
   description: >-
     Uninterruptible power supplies, power distribution units and their
     management cards.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: network-devices
+spec:
+  name: Network devices
+  parent: networking
+  description: >-
+    Physical networking hardware catalogued by model, so that a fleet's inventory
+    of model numbers can be looked up directly. A device here is a product like
+    any other -- it inherits aliases, search and a page -- and is distinguished by
+    carrying the vendor's model identifier and, usually, no release stream of its
+    own: the releases are published against the operating system it runs.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: switches
+spec:
+  name: Switches
+  parent: network-devices
+  description: Ethernet switches, as classified by their own manufacturer.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: routers
+spec:
+  name: Routers
+  parent: network-devices
+  description: Ethernet routers, as classified by their own manufacturer.
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: Category
+metadata:
+  slug: wireless-devices
+spec:
+  name: Wireless devices
+  parent: network-devices
+  description: >-
+    Devices whose manufacturer classifies them by their wireless function.
+    Deliberately not "access points": a vendor group named "Indoor wireless"
+    does not say what role a given model plays, and inferring one would be a
+    device fact nobody published.

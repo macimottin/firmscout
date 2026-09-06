@@ -1,0 +1,76 @@
+# =============================================================================
+# Device: MikroTik hAP lite (RB941-2nD)
+# =============================================================================
+# See ADR-0024 and hap-ax3.yaml for the standing note on device documents.
+#
+# Provenance:
+#   GET https://mikrotik.com/product/RB941-2nD
+#     fetched 2026-09-06T01:19:00Z, HTTP 200, 335694 bytes.
+#
+# Verbatim excerpts, whitespace-collapsed:
+#   name             <h1 class="font-bold mtk-h4 md:mtk-h3 lg:mtk-h1">hAP lite
+#   model_identifier Product code </span> <span class="basis-1/2 font-light
+#                    break-words"> RB941-2nD
+#   family           Architecture </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> SMIPS
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   runs             Operating System </span> <span class="basis-1/2 font-light
+#                    break-words"> <!--[if BLOCK]><![endif]--> RouterOS
+#                    <!--[if ENDBLOCK]><![endif]--> </span>
+#   category         breadcrumb: Home / Hardware / Indoor wireless
+#
+# Also measured and not recorded: Size of RAM 32 MB, Storage size 16 MB.
+#
+# This is the lowest-memory device in this dataset, at 32 MB of RAM, and it is
+# the reason ADR-0024 rejects the "v6 is for old hardware" hypothesis: this page
+# offers RouterOS 7.24.2 built for smips
+# (https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-smips.npk),
+# and no RouterOS 6.x version string occurs anywhere in the fetched HTML: as
+# ADR-0024 notes, the byte sequence "6.49" does occur (re-fetched and
+# re-measured 2026-09-06, 335694 bytes, unchanged: 11 hits, at offsets 11002,
+# 11215, 13216, 20524, 78445, 78658, 80659, 86000, 308474, 308687, 310688),
+# but every one of those 11 is an SVG path coordinate, e.g. the run
+# "23.5616 44.9809 23.2388V16.4903C44.9809 13.9444" at offset 11002. A
+# stricter grep -oE '6\.49\.[0-9]+' returns zero hits, while "7.24.2" appears
+# 189 times.
+# Its "Operating System" field says bare "RouterOS" rather than "RouterOS v7",
+# which is marketing copy on an older page, not a constraint -- the firmware
+# link on the same page settles it.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: mikrotik-hap-lite
+  vendor: mikrotik
+  family: smips
+
+spec:
+  name: hAP lite
+  model_identifier: RB941-2nD
+  lifecycle_status: unknown
+
+  category_slugs:
+    - network-devices
+    - wireless-devices
+
+  aliases:
+    - alias: RB941-2nD
+      kind: model_number
+      source_note: >-
+        The "Product code" specification on
+        https://mikrotik.com/product/RB941-2nD, fetched 2026-09-06T01:19:00Z.
+        It is also the string in the product page's own URL.
+    - alias: hAP lite
+      kind: marketing_name
+      source_note: The page's own <h1>.
+
+  runs:
+    - product: mikrotik-routeros
+      kind: runs_os
+      source_note: >-
+        https://mikrotik.com/product/RB941-2nD, fetched 2026-09-06T01:19:00Z:
+        Operating System "RouterOS". The same page links the device-resolved
+        image
+        https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-smips.npk

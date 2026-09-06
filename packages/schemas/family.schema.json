@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firmscout.dev/schemas/family.schema.json",
+  "title": "FirmScout product family registry entry",
+  "description": "A group of products that share a firmware image. The grouping axis must be one the vendor publishes, not a marketing series: a family that does not correspond to a published image boundary silently asserts an applicability nobody stated.",
+  "type": "object",
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "firmscout.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "ProductFamily"
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "slug",
+        "vendor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "maxLength": 128,
+          "description": "Unique within the vendor, not globally, matching the (vendor_id, slug) key on product_families."
+        },
+        "vendor": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      }
+    }
+  }
+}

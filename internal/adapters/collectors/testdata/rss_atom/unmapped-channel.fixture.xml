@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Vendor Thing Releases</title>
+    <link>https://example.test/releases</link>
+    <description>Synthetic feed for engine tests. Not a real vendor.</description>
+    <item>
+      <title>Test Vendor Thing 7.30.0 released</title>
+      <link>https://example.test/releases/7.30.0</link>
+      <guid>https://example.test/releases/7.30.0</guid>
+      <category>Nightly</category>
+      <pubDate>Fri, 04 Sep 2026 00:00:00 -0700</pubDate>
+      <description>A channel badge nobody has interpreted yet.</description>
+    </item>
+    <item>
+      <title>Test Vendor Thing 7.24.2 released</title>
+      <link>https://example.test/releases/7.24.2</link>
+      <guid>https://example.test/releases/7.24.2</guid>
+      <category>Stable</category>
+      <pubDate>Thu, 03 Sep 2026 00:00:00 -0700</pubDate>
+      <description>Routine maintenance release.</description>
+    </item>
+  </channel>
+</rss>

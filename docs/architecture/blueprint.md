@@ -104,7 +104,7 @@ The brief proposed a specific architecture. Most of it is sound. The following p
 **Proposal:** the brief asks which one.
 **Challenge:** the question conflates two different kinds of data. **Curated intent** (which vendors exist, which products we track, which sources are official, how to parse them) benefits from code review, pull requests, blame history, and offline diffing. **Observed facts** (releases, checks, artifacts, candidates, usage) are high-volume, machine-generated, append-only, and query-heavy. Forcing both into one store is wrong in both directions: a Git-only dataset cannot answer "latest version" efficiently; a PostgreSQL-only dataset makes community contribution require database access.
 **Alternative:** hybrid.
-- **Git** (`dataset/`, `collectors/config/`): vendors, product families, products, aliases, categories, source definitions, collector configurations. YAML, validated against JSON Schema in CI, synchronised into PostgreSQL by `firmscout registry sync`.
+- **Git** (`dataset/`, `collectors/config/`): vendors, product families, products — software products and hardware models alike, a model being a product carrying the vendor's published product code — aliases, categories, the product-to-product `runs_os` relationships that say which operating system a device runs, source definitions, collector configurations. YAML, validated against JSON Schema in CI, synchronised into PostgreSQL by `firmscout registry sync`.
 - **PostgreSQL**: everything observed — releases, evidence, source checks, artifacts, candidates, validations, review items, API usage, audit.
 - **Exported snapshots**: periodic public data dumps under the dataset licence, generated from PostgreSQL.
 
@@ -266,6 +266,10 @@ The design rule: **the free tier is limited by convenience, not by truth.** Noth
 | 17 | Opaque version strings, explicit date precision | Real vendor data is not semver and not always day-precise | [0017](../adr/0017-version-strings-and-date-precision.md) |
 | 18 | Compliance status is a first-class source field | Robots and terms are evaluated before collection, not after | [0018](../adr/0018-source-compliance-policy.md) |
 | 19 | API on `api.firmscout.dev`, `/api/v1` prefix retained | A base URL consumers hardcode must be able to move; apex cookies must not ride on API requests | [0019](../adr/0019-public-domain-shape.md) |
+| 20 | Multi-source conflict is a recorded finding, never an auto-resolved guess | The authority ladder only ever demotes; a same-tier disagreement is the finding, not a tie to break | [0020](../adr/0020-multi-source-conflict-detection.md) |
+| 21 | Review decisions record an asserted, unauthenticated actor | There is no login; the audit trail says so in a column rather than pretending otherwise | [0021](../adr/0021-asserted-reviewer-identity.md) |
+| 22 | One canonical problem-type catalogue, taken from api.md | Three URIs renamed and two added while the API is still unpublished and nobody depends on them | [0022](../adr/0022-canonical-problem-types.md) |
+| 23 | A concurrent dequeue defers work; it does not drain the queue | `SKIP LOCKED` promises no duplication and no loss, never drainage — the test that asserted drainage was wrong, not the queue | [0023](../adr/0023-queue-defers-rather-than-drains.md) |
 
 ---
 
@@ -544,18 +548,22 @@ Full design in [api.md](api.md); the machine-readable contract is [`docs/api/ope
 
 **Principles:** versioned path prefix (`/api/v1`), stable slugs as identifiers, cursor pagination, RFC 9457 `application/problem+json` for every error, `ETag` and `Cache-Control` on every cacheable response, `X-Request-Id` echoed on every response, rate-limit headers on every response, and no field in the response that the free tier could not also see in the browser (the paywall is on volume and endpoints, not on hiding fields in shared responses).
 
+**The cache policy is chosen by the caller, not only by the route.** The table below describes an anonymous request. Any request that presented a credential receives `Cache-Control: private, no-store` on the same endpoint, whatever its row says — the immutable `/releases/{id}` included — because the release-history body depends on the caller's plan and `Vary` alone is not trusted at the edge. The `ETag` is still issued, so a keyed client can revalidate its own copy. Enforced in `CacheHeaders` (`internal/adapters/httpapi/middleware.go`); reasoning in [api.md](api.md) §1 and [security.md](security.md) §4.10 (T-13).
+
 | Endpoint | Auth | Cache | Tier |
 | --- | --- | --- | --- |
 | `GET /api/v1/search?q=` | optional key | short (60 s), normalised query key | all |
 | `GET /api/v1/vendors` | optional | long | all |
 | `GET /api/v1/vendors/{slug}` | optional | long, invalidated on publish | all |
 | `GET /api/v1/products/{slug}` | optional | long, invalidated on publish | all |
-| `GET /api/v1/products/{slug}/releases` | optional | long | window for free; full history for Professional+ |
-| `GET /api/v1/products/{slug}/latest` | optional | long, invalidated on publish | all |
-| `GET /api/v1/products/{slug}/advisories` | optional | medium | all (structured detail Professional+) |
+| `GET /api/v1/products/{slug}/releases` | optional | medium (300 s) | window for free; full history for Professional+ |
+| `GET /api/v1/products/{slug}/latest` | optional | medium (300 s), invalidated on publish | all |
+| `GET /api/v1/products/{slug}/advisories` | optional | medium | all (structured detail Professional+) — **not routed yet** (Phase 4) |
 | `GET /api/v1/releases/{id}` | optional | immutable | all |
-| `POST /api/v1/lookup` (bulk) | key required | none | Professional+ |
-| `GET /api/v1/usage` | key required | none | keyed |
+| `POST /api/v1/lookup` (bulk) | key required | none | Professional+ — **not routed yet** (Phase 3) |
+| `GET /api/v1/usage` | key required | none | keyed — **not routed yet** (Phase 3) |
+
+The three rows marked *not routed yet* are the intended contract and have no handler today; `internal/adapters/httpapi/router.go` registers the other seven plus `/healthz`, `/readyz` and `/metrics`, and `docs/api/openapi.yaml` matches the router exactly, in both directions, under test. A fourth group exists and is deliberately outside this table: the four unauthenticated `/internal/review` routes, off by default behind three switches on two hosts — see [api.md](api.md) §11 and [ADR-0021](../adr/0021-asserted-reviewer-identity.md).
 
 **Anonymous access to the read endpoints is deliberate.** The public website is a client of this same API. Blocking anonymous API access would only push the site's own traffic into a different code path with a different cache and a different failure mode. Anonymous requests are simply rate-limited more tightly and cannot reach bulk endpoints.
 
@@ -802,13 +810,13 @@ Full document: [security.md](security.md); decision context: [ADR-0008](../adr/0
 
 The threat model is organised by trust boundary, with STRIDE applied per boundary. Two threats dominate.
 
-**Server-side request forgery is the highest-severity technical threat.** FirmScout's core function is fetching URLs that contributors propose and that AI agents discover. An attacker who gets `http://169.254.169.254/latest/meta-data/` into the source registry reaches cloud credentials. The mitigation is layered: scheme restriction to HTTP and HTTPS; DNS resolution followed by IP validation against blocked ranges (loopback, link-local, RFC 1918, CGNAT, IPv6 unique-local, IPv4-mapped IPv6, and the metadata endpoints); pinning the validated IP for the actual connection to defeat DNS rebinding; **re-validating after every redirect**, because a redirect chain is the usual bypass; rejecting non-standard IP encodings; and network-level egress restriction as defence in depth. This is implemented in the first vertical slice, not deferred.
+**Server-side request forgery is the highest-severity technical threat.** FirmScout's core function is fetching URLs that contributors propose and that AI agents discover. An attacker who gets `http://169.254.169.254/latest/meta-data/` into the source registry reaches cloud credentials. The mitigation is layered: scheme restriction to HTTP and HTTPS; DNS resolution followed by IP validation against blocked ranges (loopback, link-local, RFC 1918, CGNAT, IPv6 unique-local, IPv4-mapped IPv6, and the metadata endpoints); validating the resolved literal address from inside `net.Dialer.Control`, immediately before `connect(2)`, so there is no re-resolution between the check and the use and DNS rebinding has no window; **re-validating after every redirect**, because a redirect chain is the usual bypass; rejecting non-standard IP encodings; and network-level egress restriction as defence in depth. This is implemented (`internal/adapters/fetch/ssrf.go`), not deferred — and it has never met an adversary, which is why an outside review of the implementation is still an open question in [security.md](security.md) §8.
 
 **Data integrity is the highest-*impact* threat to the product's purpose.** If an attacker induces FirmScout to publish a wrong firmware version, a real organisation may run vulnerable firmware believing it is current. That is worse than an outage. The mitigations are the same mechanisms that make the product trustworthy in the first place: evidence retention, source authority ranking, multi-source conflict detection that never auto-resolves a disagreement between two official sources, plausibility checks, and human review for anything below threshold.
 
-Also modelled in full: collector sandbox escape and resource exhaustion (decompression bombs, XML entity expansion, catastrophic regex backtracking), prompt injection from fetched vendor content, supply-chain compromise through a malicious collector configuration in a pull request, API key handling, tenant inventory data exposure, denial of wallet, and audit and repudiation.
+Also modelled in full: collector sandbox escape and resource exhaustion (decompression bombs, XML entity expansion, catastrophic regex backtracking), prompt injection from fetched vendor content, supply-chain compromise through a malicious collector configuration in a pull request, API key handling, tenant inventory data exposure, denial of wallet, audit and repudiation, and — added after it actually happened — the internal review surface being reached from the internet through a public first-party client that called it on a visitor's behalf ([security.md](security.md) §4.11, T-16).
 
-**Implemented versus planned is stated honestly.** In the first vertical slice: the SSRF guard, content-size and MIME limits, and timeouts. Everything else is design.
+**Implemented versus planned is stated honestly**, in [security.md](security.md) §5's control table. Implemented today: the SSRF guard, content-size, MIME and timeout limits, decompression-ratio limits, the RE2-only regex policy, caller-chosen cache policy so a keyed response is never publicly cacheable, an `audit_events` row on every human review decision, and the removal of the public web app's write path to the review surface. Still design: extraction deadlines, API key generation, tenant isolation, redaction, and everything that needs an AWS account. "Implemented" means the code exists and its tests pass locally — there is no deployment, so nothing here has been exercised against an adversary.
 
 ---
 
@@ -1096,7 +1104,7 @@ Full definition: [definition-of-done.md](definition-of-done.md). Per level — c
 
 ## 45. ADR list
 
-Index: [`docs/adr/README.md`](../adr/README.md). Nineteen ADRs, 0001 through 0019, listed with their decisions in §6. Two require qualified legal review: [0009](../adr/0009-code-and-data-licensing.md) and [0018](../adr/0018-source-compliance-policy.md).
+Index: [`docs/adr/README.md`](../adr/README.md). Twenty-three ADRs, 0001 through 0023, listed with their decisions in §6. Two require qualified legal review: [0009](../adr/0009-code-and-data-licensing.md) and [0018](../adr/0018-source-compliance-policy.md).
 
 ---
 

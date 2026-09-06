@@ -39,7 +39,7 @@ spec:
 
 | Key | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `spec.engine` | string enum | yes | — | Which extraction engine interprets the rest of `spec`. MVP values: `html_selectors`, `text_regex`. Roadmap values (rejected by the MVP loader, reserved in the schema): `json_path`, `rss_atom`, `xml_xpath`, `pdf_text`, `github_releases`. See §4 for what each engine does and its limits. |
+| `spec.engine` | string enum | yes | — | Which extraction engine interprets the rest of `spec`. Implemented values: `html_selectors`, `text_regex`, `rss_atom` (Phase 2). Roadmap values (rejected by the loader as unimplemented, reserved in the schema): `json_path`, `xml_xpath`, `pdf_text`, `github_releases`. See §4 for what each engine does and its limits. |
 
 ### 3.2 `spec.product_match`
 
@@ -70,7 +70,7 @@ spec:
 
 | Key | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `spec.extract.release_container` | selector/pattern string | yes | — | Identifies each repeating unit that becomes one `CandidateRelease`. For `html_selectors`, a CSS selector where each match is one container; for `text_regex`, a named-group-bearing regex where each match is one container. |
+| `spec.extract.release_container` | selector/pattern string | yes for `html_selectors`/`text_regex`; optional (default `auto`) for `rss_atom` | — | Identifies each repeating unit that becomes one `CandidateRelease`. For `html_selectors`, a CSS selector where each match is one container; for `text_regex`, a named-group-bearing regex where each match is one container; for `rss_atom`, one of `auto`/`item`/`entry` naming which feed entries to read (§4.4). |
 | `spec.extract.fields` | map[string]FieldSpec | yes | — | One entry per `CandidateRelease` field to populate. See §3.6 for `FieldSpec`. Unlisted fields take their type's zero value (`""`, `PrecisionUnknown`, etc.) — a config is never required to populate a field it has no data for, but `version` (mapping to `RawVersion`) is required to be present, per §5 validation. |
 | `spec.extract.release_type` | string | yes | — | Fixed `ReleaseType` value for every candidate this config produces (e.g. `embedded_os`). Config-driven collectors do not infer `release_type` per-candidate in the MVP — a source that genuinely mixes release types needs either separate configs (one per type) or a code collector. |
 | `spec.extract.channel` | string | no | `""` | Fixed `Channel` value, used when a source has no per-candidate channel field to extract (contrast with a `fields.channel` entry, which extracts a *varying* channel per candidate — set at most one of the two). |
@@ -82,7 +82,7 @@ spec:
 | Key | Type | Required | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `selector` | selector/pattern string | yes | — | Where to find this field's raw value, scoped inside the matched `release_container`. `:scope` refers to the container element itself (its own text/attributes), for engines that support it. |
-| `attribute` | string | no | element text content | For `html_selectors`: read an HTML attribute (e.g. `href`, `data-version`) instead of the element's text. |
+| `attribute` | string | no | element text content | For `html_selectors`: read an HTML attribute (e.g. `href`, `data-version`) instead of the element's text. Rejected for `text_regex` and `rss_atom` — the latter's `link` selector already resolves Atom's `href` without the config having to know which dialect it is looking at. |
 | `regex` | string | no | none (use full matched text) | A bounded regex (§9) applied to the text `selector` produced; if it has a capture group, group 1 is used, otherwise the whole match. Used both to extract from free text and, for `text_regex`, in combination with `release_container`'s own capture groups. |
 | `transform` | string or list of strings | no | `[]` (no transform) | One or an ordered pipeline of transforms from the vocabulary in §5. Applied in list order. |
 | `map` | map[string]string | no | none | Exact-match lookup translating a raw value (after `transform`) to FirmScout's constrained vocabulary (e.g. channel labels). A value with no entry in `map` is a **hard extraction error** for that candidate, not a silent pass-through — an unmapped label must fail loudly (developing-collectors.md), routing that candidate to a failed-extraction state rather than inventing a channel. |
@@ -113,12 +113,54 @@ spec:
 | Engine | Input | Selector language | Known limitations to design around |
 | --- | --- | --- | --- |
 | `json_path` | Parsed JSON body | JSONPath (or a bounded subset) | JSONPath implementations vary in expressiveness/safety; the eventual engine picks one bounded subset and documents it rather than exposing a full scripting-capable variant. |
-| `rss_atom` | Parsed RSS 2.0 / Atom feed | Fixed field mapping (title, link, pubDate, description) plus optional `regex` post-processing on those fields | Feed metadata is usually coarser than a dedicated changelog page (often no channel, sometimes no structured version field) — expect lower-confidence candidates and more validation-gate 8 review routing than `html_selectors`. |
 | `xml_xpath` | Parsed XML body | XPath 1.0 subset | XPath's full expressiveness (functions, unbounded axis traversal) is a similar risk surface to unbounded regex; the engine bounds evaluation cost the same way `text_regex` bounds regex cost. |
 | `pdf_text` | Extracted text layer of a PDF | Same as `text_regex`, applied to extracted text | PDF text extraction quality varies wildly (scanned images with no text layer, multi-column layouts producing scrambled reading order); this engine is the intended path for Poly/HP release notes but needs its own accuracy review before being trusted for auto-publication-eligible sources. |
 | `github_releases` | GitHub Releases API response | Fixed field mapping (tag_name, published_at, body, prerelease) plus optional `regex`/`transform` on those fields | Tied to GitHub API rate limits and to whether a vendor's releases are actually tagged consistently; a reasonable fit for vendor-maintained-repository-class sources (DATA_SOURCES.md quality classes). |
 
-Each roadmap engine, when built, gets its own `spec.engine` value, its own section in this document, and its own fixture corpus in the engine's own test suite (distinct from any individual vendor config's fixtures) before any vendor config is allowed to declare it.
+Each roadmap engine, when built, gets its own `spec.engine` value, its own section in this document, and its own fixture corpus in the engine's own test suite (distinct from any individual vendor config's fixtures) before any vendor config is allowed to declare it. `rss_atom` went through exactly this process for Phase 2 and is documented next, no longer in the table above.
+
+### 4.4 `rss_atom` (Phase 2)
+
+**Input:** the fetched artifact's body, parsed as an RSS 2.0 or Atom feed with `encoding/xml` from the standard library — no feed-parsing library is added. Go's decoder matches a struct tag against an element's *local* name irrespective of namespace, which is what lets one entry type serve both RSS's `<item>`/`<pubDate>` and Atom's namespaced `<entry>`/`<published>` without the engine ever branching on which dialect it was handed.
+
+**Selector language:** a closed, ten-name feed-field vocabulary, not a path expression. A `selector` on an `rss_atom` field is `:scope` or one of `title`, `link`, `guid`, `description`, `content`, `pub_date`, `updated`, `category`, `author`; anything else is a load-time error naming the whole list, because a selector outside the vocabulary would silently match nothing forever. `attribute:` is rejected for this engine — Atom's `link/@href` is already what `link` resolves, without the config having to know which dialect it is looking at.
+
+Resolution is exact, and no field falls back to another:
+
+| Selector | RSS 2.0 | Atom | Absent → |
+| --- | --- | --- | --- |
+| `title` | `<title>` text | `<title>` text | not located |
+| `link` | `<link>` text | first `<link>` with `rel="alternate"` or no `rel`, its `href` | not located |
+| `guid` | `<guid>` text | `<id>` text | not located |
+| `description` | `<description>` | `<summary>` | not located |
+| `content` | `<content:encoded>` | `<content>` | not located |
+| `pub_date` | `<pubDate>` | `<published>` | not located — **never falls back to `updated`** |
+| `updated` | *(not present in RSS items)* | `<updated>` | not located |
+| `category` | first `<category>` text | first `<category>`'s `term` attribute | not located |
+| `author` | `<author>` text | `<author><name>` text | not located |
+| `:scope` | `title link pub_date description`, single-spaced, empty parts skipped, whitespace-collapsed | same | never empty when the entry has any of them |
+
+`pub_date` meaning RSS's `<pubDate>` or Atom's `<published>` and never Atom's `<updated>` is deliberate: a config for a feed that only carries `<updated>` must say `updated` out loud rather than have the engine decide the two mean the same thing.
+
+Markup inside a `<description>` or `<content>`-shaped field (CDATA or escaped) is returned as character data and is **not** parsed a second time — a second parser inside this engine would be a second attack surface, and a config that needs a value out of embedded HTML uses the field's `regex`.
+
+**`spec.extract.release_container`:** `auto` (default), `item` (RSS 2.0 only), or `entry` (Atom only). The container is a feed entry, not a selector, so the key still defaults rather than being silently ignored: a config that declares `item` and is handed an Atom document extracts nothing and warns, which is a repair signal, not something to paper over.
+
+**`spec.normalize.section_selector`, `.strip`, `.replace`** are rejected for this engine. The first two are CSS, which has no meaning against an XML feed; the third would rewrite XML with a regex before parsing it, which is how a parser starts seeing something its author never wrote.
+
+**Warnings**, at minimum:
+
+- body larger than the input limit → truncated, warned (same wording shape as `text_regex`) — and, because a truncated XML document usually fails to parse at all, this warning is only reachable when truncation happens not to break well-formedness.
+- document parses but is neither RSS nor Atom → 0 candidates, warning naming the root element.
+- `release_container: item` against an Atom document, or the reverse → 0 candidates, warning naming both what was asked for and what was found.
+- 0 entries → warning, not an error (a feed with no items is a valid feed).
+- entry count over the engine's own ceiling → warning that later entries were ignored.
+- a parse failure → an error, not a warning.
+
+**Limitations, documented rather than worked around:**
+
+- A feed declaring a non-UTF-8 encoding fails extraction with a clear error. A `CharsetReader` would need `golang.org/x/net/html/charset`, a dependency this project has not authorised, for a case RSS/Atom practice has essentially eliminated.
+- Undeclared XML entities beyond the five predefined XML entities are an error, because relaxing the parser to accept them would make it accept malformed feeds silently.
 
 ## 5. Transform vocabulary
 
@@ -165,7 +207,7 @@ This is the field-level rule that makes blueprint's "no invented precision" prin
 
 **The `firmscout collector test` workflow** (CLI subcommand, `apps/cli`) is the local-development equivalent of checks 1, 3, and 4, runnable against one config file without waiting for CI: `firmscout collector test collectors/config/mikrotik/changelogs.yaml` loads the config, validates it against the schema, and runs every fixture found in the corresponding `testdata/fixtures/<vendor>/<source>/` directory, printing a diff for any mismatch. It is the command a contributor runs before opening a pull request, and the one CI runs (across every config) to produce check 4 above.
 
-## 8. Two complete worked examples
+## 8. Three complete worked examples
 
 ### 8.1 MikroTik changelog — `html_selectors` (exactly as given in blueprint §14)
 
@@ -205,7 +247,7 @@ spec:
     evidence_excerpt: ":scope"
 ```
 
-Why each choice is made is walked through in [`docs/collectors/developing-collectors.md`](../collectors/developing-collectors.md#worked-example-the-mikrotik-changelog-collector") — the short version: `normalize.section_selector` avoids hashing the ~400 KB page's volatile Livewire/Alpine attributes so unrelated page churn does not trigger needless extraction; `channel.map` fails loudly on an unrecognised badge label instead of guessing; `release_date.precision: exact_day` is set because the page genuinely publishes full `YYYY-MM-DD` dates, matched exactly by the regex, per §6's rule.
+Why each choice is made is walked through in [`docs/collectors/developing-collectors.md`](../collectors/developing-collectors.md#worked-example-the-mikrotik-changelog-collector) — the short version: `normalize.section_selector` avoids hashing the ~400 KB page's volatile Livewire/Alpine attributes so unrelated page churn does not trigger needless extraction; `channel.map` fails loudly on an unrecognised badge label instead of guessing; `release_date.precision: exact_day` is set because the page genuinely publishes full `YYYY-MM-DD` dates, matched exactly by the regex, per §6's rule.
 
 ### 8.2 MikroTik plain-text version endpoint — `text_regex`
 
@@ -260,6 +302,63 @@ The endpoint's body is `7.24.2 1788429434`. The second token is an epoch, precis
 An earlier draft of this document argued for `year_only` here, on the grounds that day precision overstated what the source asserted. That reasoning was half right and reached the wrong conclusion: `year_only` is the *same inference*, merely coarser. It still claims the source told us a year, and it did not. Degrading precision does not launder an unsupported inference into a supported one.
 
 **So this config extracts no release date at all.** The candidate carries `unknown` precision, and the raw epoch survives verbatim in the evidence excerpt, where a reviewer can see it and a later, deliberate decision could promote it. Nothing is lost, because the changelog collector (§8.1) reads MikroTik's own published `YYYY-MM-DD` dates, so the product is dated by the source that actually states a date. Where both collectors produce a candidate for the same version, gate 10 reconciles them (blueprint §16).
+
+The rule this generalises to: **a field is extractable only when the source says what it means.** Numeric precision is not semantic precision, and a value's being present in a response is not the same as the vendor asserting it.
+
+### 8.3 Fortinet PSIRT advisory feed — `rss_atom`
+
+Measured 2026-09-05: `GET https://www.fortiguard.com/rss/ir.xml` 302s to `https://filestore.fortinet.com/fortiguard/rss/ir.xml`, an RSS 2.0 document (`text/xml`, ~38 KB). Each `<item>` carries a title, a link to the advisory page, a `guid` equal to the link, a CDATA description and an RFC 1123 `pubDate`. The link contains the vendor's own advisory identifier (`FG-IR-26-163`). The feed does **not** state which products an advisory affects — that fact lives on the advisory page, not in the feed.
+
+```yaml
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+metadata:
+  id: fortinet.psirt-advisories
+  vendor: fortinet
+  version: 1
+spec:
+  engine: rss_atom
+  product_match:
+    product: fortinet-fortios
+  fetch:
+    expected_content_type: text/xml
+    max_bytes: 1048576 # 1 MiB; the measured feed is 38 KB
+    conditional: auto  # both an ETag and a Last-Modified are served; auto prefers the ETag
+  extract:
+    # Declared explicitly rather than left as `auto`: if Fortinet switched the
+    # feed to Atom, extracting nothing and warning is the repair signal we
+    # want, not silently reading a differently-shaped document.
+    release_container: item
+    fields:
+      version:
+        # The advisory identifier, read from the item's link. Every measured
+        # item has one; an item without one produces no candidate and a
+        # warning, which is the correct outcome for a feed entry FirmScout
+        # cannot name.
+        selector: link
+        regex: "(FG-IR-[0-9]{2}-[0-9]{3})"
+        transform: trim
+      release_date:
+        selector: pub_date
+        date_format: "Mon, 02 Jan 2006 15:04:05 -0700"
+        precision: exact_day
+      release_notes_url:
+        selector: link
+        transform: trim
+    release_type: advisory
+    evidence_excerpt: title
+    confidence:
+      base: 0.55   # see below: deliberately below the 0.85 auto-publication threshold
+      missing_optional_penalty: 0.1
+      floor: 0.55
+```
+
+Two consequences follow from what the feed does and does not say, and both are deliberate:
+
+1. `version` is the advisory identifier, not a software version. It is the only stable, vendor-issued identifier every item carries, and nothing in FirmScout orders it (ADR-0017) — `AssessTransition` is never asked about an advisory.
+2. `confidence.base` is `0.55`, below the 0.85 automatic-publication threshold, so validation gate 8 routes **every** candidate from this source to human review. That is not pessimism about the extraction, which is exact; it is an honest statement that a candidate asserting "this advisory concerns FortiOS" is not a complete fact, because the feed never said which products are affected. `product_match.product` supplies a product *hint* that gate 1 resolves and a human confirms, never a resolved fact. A comment would not survive the day somebody enables this source; the confidence score does.
+
+No advisory from this feed is publishable as a release in this phase: `Release.EligibleForLatest()` excludes `advisory` by type (D17), and advisory-to-product correlation is Phase 4 (`security_advisories`), out of scope here. This config exercises extraction, validation and review routing for the `advisory` release type end to end without ever answering "what version should I be on?" with an advisory identifier — exactly the class of wrong answer this project exists not to give.
 
 The rule this generalises to: **a field is extractable only when the source says what it means.** Numeric precision is not semantic precision, and a value's being present in a response is not the same as the vendor asserting it.
 

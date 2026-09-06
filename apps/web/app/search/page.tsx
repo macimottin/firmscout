@@ -12,7 +12,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getProduct, isUnreachable, search, type Product, type SearchResultItem } from "@/lib/api";
+import {
+  getProduct,
+  isUnreachable,
+  search,
+  type Product,
+  type SearchResultItem,
+} from "@/lib/api";
+import {
+  searchApplicabilityCaveat,
+  searchVersionCellLabel,
+} from "@/lib/applicability";
+import { formatUtcDay } from "@/lib/release-display";
 
 export const metadata: Metadata = {
   title: "Search",
@@ -23,7 +34,9 @@ interface SearchPageProps {
   searchParams: Promise<{ q?: string }>;
 }
 
-async function enrichProductResult(item: SearchResultItem): Promise<Product | null> {
+async function enrichProductResult(
+  item: SearchResultItem,
+): Promise<Product | null> {
   try {
     return await getProduct(item.slug);
   } catch {
@@ -44,7 +57,9 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
       <div className="mt-8">
         {query.length === 0 ? (
-          <p className="text-sm text-ink-500">Enter a vendor or product name above to search.</p>
+          <p className="text-sm text-ink-500">
+            Enter a vendor or product name above to search.
+          </p>
         ) : (
           <SearchResults query={query} />
         )}
@@ -72,15 +87,19 @@ async function SearchResults({ query }: { query: string }) {
   if (results.length === 0) {
     return (
       <p className="text-sm text-ink-500">
-        No vendors or products matched &ldquo;{query}&rdquo;. Try a different spelling, or the
-        vendor name on its own.
+        No vendors or products matched &ldquo;{query}&rdquo;. Try a different
+        spelling, or the vendor name on its own.
       </p>
     );
   }
 
   const productResults = results.filter((r) => r.type === "product");
-  const enriched = await Promise.all(productResults.map((item) => enrichProductResult(item)));
-  const productDetails = new Map(productResults.map((item, i) => [item.slug, enriched[i]]));
+  const enriched = await Promise.all(
+    productResults.map((item) => enrichProductResult(item)),
+  );
+  const productDetails = new Map(
+    productResults.map((item, i) => [item.slug, enriched[i]]),
+  );
 
   return (
     <Table>
@@ -132,29 +151,68 @@ async function SearchResults({ query }: { query: string }) {
                 >
                   {item.name}
                 </Link>
+                {item.modelIdentifier ? (
+                  <>
+                    <br />
+                    <span className="font-mono text-xs text-ink-500">
+                      {item.modelIdentifier}
+                    </span>
+                    <Badge variant="outline" className="ml-2">
+                      Device
+                    </Badge>
+                    {/* DEFECT 12: this is the first screen a fleet manager reaches
+                        after pasting a model number. An unverified firmware fit must
+                        be visible here, not only after they click through -- but a
+                        results row is not the place for the full alert banner the
+                        product page shows, so a compact badge carries the same fact
+                        at proportionate size. */}
+                    {searchApplicabilityCaveat(product) ? (
+                      <Badge variant="warning" className="ml-2">
+                        Firmware fit unverified
+                      </Badge>
+                    ) : null}
+                  </>
+                ) : null}
               </TableCell>
               <TableCell className="text-ink-600">
                 {item.vendor ? (
-                  <Link href={`/vendors/${item.vendor.slug}`} className="hover:underline">
+                  <Link
+                    href={`/vendors/${item.vendor.slug}`}
+                    className="hover:underline"
+                  >
                     {item.vendor.name}
                   </Link>
                 ) : (
                   "—"
                 )}
               </TableCell>
+              {/* DEFECT 12: this column used to fall back to the name of the
+                  operating system a device runs (e.g. "RouterOS") in the same
+                  monospace styling as a real version -- a non-version presented as
+                  a version in the column read as "what to flash". It now only ever
+                  shows a real version or an honest em dash; see
+                  lib/applicability.ts. */}
               <TableCell className="font-mono text-ink-800">
-                {latest ? latest.rawVersion : product === null ? "—" : "Unknown"}
+                {searchVersionCellLabel(latest?.rawVersion)}
               </TableCell>
               <TableCell className="text-ink-600">
                 {latest ? (
-                  <ReleaseDate date={latest.releaseDate} precision={latest.releaseDatePrecision} />
+                  <ReleaseDate
+                    date={latest.releaseDate}
+                    precision={latest.releaseDatePrecision}
+                  />
                 ) : (
                   "—"
                 )}
               </TableCell>
-              <TableCell className="text-ink-600">{product?.releaseType ?? "—"}</TableCell>
+              <TableCell className="text-ink-600">
+                {product?.releaseType ?? "—"}
+              </TableCell>
+              {/* A device has no verifying source, so lastVerifiedAt is absent on the
+                  wire; formatting it unguarded threw RangeError and 500ed the whole
+                  result page the moment one device matched a query. */}
               <TableCell className="text-ink-500">
-                {product ? new Date(product.lastVerifiedAt).toISOString().slice(0, 10) : "—"}
+                {formatUtcDay(product?.lastVerifiedAt) ?? "—"}
               </TableCell>
             </TableRow>
           );

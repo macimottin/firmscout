@@ -223,6 +223,22 @@ func RequestIDFromContext(ctx context.Context) string {
 	return id
 }
 
+// traceIDFromContext returns the W3C trace id of the active span, or "" when the
+// request is not being traced.
+//
+// It is recorded on an audit row rather than only in a log line because the audit trail
+// outlives the log retention window: a decision from six months ago is still queryable,
+// and the trace id is what lets somebody line it up with whatever telemetry was kept.
+func traceIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		return sc.TraceID().String()
+	}
+	return ""
+}
+
 // RequestIDFromRequest is the convenience form for a handler that has the request.
 func RequestIDFromRequest(r *http.Request) string {
 	if r == nil {

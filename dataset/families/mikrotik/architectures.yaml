@@ -1,0 +1,110 @@
+# =============================================================================
+# Product families: MikroTik device architectures
+# =============================================================================
+# A family here groups devices MikroTik publishes the SAME BASE ROUTEROS IMAGE
+# FILE for. That is the entire claim, and it is measured: on every device page
+# in this dataset the value of the published "Architecture" specification
+# matches the architecture token in the routeros-<version>-<arch>.npk URL the
+# same page links -- ARM 64bit -> arm64, ARM 32bit -> arm, MIPSBE -> mipsbe,
+# SMIPS -> smips, PPC -> ppc. Zero mismatches, here and across the seventeen
+# pages the recon fetched. Each family below names the page the pairing was read
+# from, with the timestamp it was fetched.
+#
+# What a family here does NOT claim, and must not be used to claim:
+#
+#   * It is not a version stream. Every architecture measured -- from a 32 MB
+#     SMIPS hAP lite through a 2007-era MIPSBE RB433 to an ARM 64bit hAP ax3 --
+#     is offered the SAME version, RouterOS 7.24.2. Architecture decides which
+#     file, never which release.
+#   * It is not the full package set. hAP be lite and CRS328-24P-4S+RM are both
+#     "ARM 32bit" and are offered the same base image, yet only the first is
+#     also offered a wireless driver (wifi-mediatek-7.24.2-arm.npk); RB433 and
+#     RB1100AHx2 additionally take a per-SoC RouterBOOT .fwf image
+#     (ar7100-7.24.2.fwf, p2020-7.24.2.fwf). The per-device distinction is real
+#     and stays per-device.
+#
+# Consequently NO release_product_mappings row targets any of these families,
+# and none may be added without new evidence. See ADR-0024.
+#
+# Only architectures with at least one registered member are declared. MikroTik
+# also publishes TILE and MMIPS devices; no device in this dataset has one, so
+# declaring those families would be a group with nothing in it and no evidence
+# gathered for it.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: ProductFamily
+metadata:
+  slug: arm-64bit
+  vendor: mikrotik
+spec:
+  name: ARM 64bit
+  description: >-
+    MikroTik devices whose published "Architecture" specification is
+    "ARM 64bit", and which are therefore offered the same base RouterOS image
+    file, routeros-<version>-arm64.npk. Measured on
+    https://mikrotik.com/product/hap_ax3 (fetched 2026-09-06T01:18:43Z), whose
+    Architecture row reads "ARM 64bit" and whose device-resolved firmware link
+    is https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-arm64.npk
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: ProductFamily
+metadata:
+  slug: arm-32bit
+  vendor: mikrotik
+spec:
+  name: ARM 32bit
+  description: >-
+    MikroTik devices whose published "Architecture" specification is
+    "ARM 32bit", and which are therefore offered the same base RouterOS image
+    file, routeros-<version>-arm.npk. Measured on
+    https://mikrotik.com/product/crs328_24p_4s_rm (fetched
+    2026-09-06T01:18:56Z), whose Architecture row reads "ARM 32bit" and whose
+    device-resolved firmware link is
+    https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-arm.npk
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: ProductFamily
+metadata:
+  slug: mipsbe
+  vendor: mikrotik
+spec:
+  name: MIPSBE
+  description: >-
+    MikroTik devices whose published "Architecture" specification is "MIPSBE",
+    and which are therefore offered the same base RouterOS image file,
+    routeros-<version>-mipsbe.npk. Measured on
+    https://mikrotik.com/product/RB433 (fetched 2026-09-06T01:19:01Z), whose
+    Architecture row reads "MIPSBE" and whose device-resolved firmware link is
+    https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-mipsbe.npk
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: ProductFamily
+metadata:
+  slug: smips
+  vendor: mikrotik
+spec:
+  name: SMIPS
+  description: >-
+    MikroTik devices whose published "Architecture" specification is "SMIPS",
+    and which are therefore offered the same base RouterOS image file,
+    routeros-<version>-smips.npk. Measured on
+    https://mikrotik.com/product/RB941-2nD (fetched 2026-09-06T01:19:00Z),
+    whose Architecture row reads "SMIPS" and whose device-resolved firmware
+    link is
+    https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-smips.npk
+---
+apiVersion: firmscout.dev/v1alpha1
+kind: ProductFamily
+metadata:
+  slug: ppc
+  vendor: mikrotik
+spec:
+  name: PPC
+  description: >-
+    MikroTik devices whose published "Architecture" specification is "PPC", and
+    which are therefore offered the same base RouterOS image file,
+    routeros-<version>-ppc.npk. Measured on
+    https://mikrotik.com/product/RB1100AHx2 (fetched 2026-09-06T01:19:03Z),
+    whose Architecture row reads "PPC" and whose device-resolved firmware link
+    is https://download.mikrotik.com/routeros/7.24.2/routeros-7.24.2-ppc.npk

@@ -11,6 +11,15 @@
 #   GET https://mikrotik.com/robots.txt
 #     -> "User-agent: *" with an empty "Disallow:", i.e. nothing is disallowed.
 #
+# Re-measured 2026-09-05 (18:26:58Z), against this source's own host:
+#   GET https://mikrotik.com/robots.txt
+#     -> HTTP 200, exactly three lines: "User-agent: *", an empty "Disallow:", and
+#        "Sitemap: https://mikrotik.com/sitemap.xml". An empty Disallow permits every
+#        path, so nothing here restricts /download/changelogs.
+#   GET https://mikrotik.com/download/changelogs
+#     -> HTTP 200, still "cache-control: private, must-revalidate" and still no ETag,
+#        so the section-hash change signal below is still the only one available.
+#
 # Because the page serves no ETag and declares itself private, a conditional
 # request cannot be used as the change signal. The cheap signal available is a
 # hash over normalize.section_selector only -- hashing the whole 409 KB document
@@ -20,9 +29,32 @@
 # ------------------------------- ADR-0018 ------------------------------------
 # This source ships with enabled: false and terms_review_status: pending because
 # ADR-0018 requires a human to review the site's terms of use before any
-# collection happens. robots_policy_status is a mechanical, measured fact;
-# terms_review_status is a human judgement that has not yet been made. Neither
-# this file nor the collector config may enable collection until it has been.
+# collection happens, and because this repository's own regression test
+# (TestEverySourceShipsPendingTermsReview, internal/adapters/registry) refuses to
+# let ANY source in the committed dataset be collectable by default -- cloning
+# this public repository and running its documented Quick Start must never, on
+# its own, cause a request against a manufacturer's live infrastructure.
+# robots_policy_status is a mechanical, measured fact; terms_review_status is a
+# human judgement, and what follows records one that has in fact been made, on a
+# specific working copy, without changing what ships here.
+#
+# Measured 2026-09-05: MikroTik publishes no terms of use. /terms, /terms.html,
+# /legal, /terms-of-use and /tos all return 404; the sitemap's only legal document
+# is /privacy; that page's headings are "Privacy Policy" and "Processing of
+# personal data by MikroTik" and it contains no occurrence of "crawl", "scrape",
+# "automated", "robot", "reuse" or "redistribute". This page is also the one
+# where the question has teeth: it is 409 KB of authored changelog prose, not a
+# bare version pointer, so a committed decision would also have to settle
+# whether MikroTik being a Latvian company puts the EU sui generis database
+# right in play over it, and whether extracting version, channel and date from
+# 46 entries is a substantial extraction or de minimis factual data. Neither
+# question is resolved here.
+#
+# On 2026-09-05 the repository owner reviewed exactly this evidence and
+# explicitly authorized a live collection run against it, in these words: "pode
+# rodar o check-source contra a MikroTik". That authorization was applied to a
+# local working database for one session's demonstration, not committed here --
+# see the ADR-0018 note above for why those are different decisions.
 # -----------------------------------------------------------------------------
 
 apiVersion: firmscout.dev/v1alpha1
@@ -43,15 +75,24 @@ spec:
 
   # Compliance -- see the ADR-0018 note above.
   robots_policy_status: allowed
-  robots_checked_at: 2026-09-03T00:00:00Z
+  robots_checked_at: 2026-09-05T18:26:58Z
   terms_review_status: pending
   terms_review_note: >-
-    ADR-0018: a human must review mikrotik.com's terms of use before this source
-    is enabled. robots.txt permits the path (measured 2026-09-03), but robots
-    permission alone is not sufficient.
+    ADR-0018: a human must review MikroTik's terms of use before this source is
+    collectable IN THE COMMITTED REGISTRY. Measured 2026-09-05:
+    mikrotik.com/robots.txt is "User-agent: *" with an empty "Disallow:", which
+    permits this path; and MikroTik publishes no terms of use anywhere (/terms,
+    /terms.html, /legal, /terms-of-use and /tos are 404, and the only legal
+    document in the sitemap is a personal-data privacy notice silent on
+    automated access and on reuse of published content). No published terms is
+    not the same as permission, so the committed judgement stays pending. A
+    human review against exactly this evidence DID happen on 2026-09-05, and
+    was applied to a local working database rather than to this file -- see the
+    ADR-0018 note above for why those are different decisions.
   authentication_type: none
 
-  # Not collected from until the terms review above is complete.
+  # Not collected from until the terms review above is complete, in this
+  # committed file. See the ADR-0018 note above.
   enabled: false
   health: pending_review
 

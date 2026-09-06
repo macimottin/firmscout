@@ -26,6 +26,14 @@ const (
 	EventCollectorFailed      EventName = "CollectorFailed"
 	EventCollectorRecovered   EventName = "CollectorRecovered"
 
+	// Multi-source conflict and human review events. A conflict is a fact about the
+	// catalogue rather than about one candidate, which is why the detected and
+	// resolved events carry a product subject and the review resolution carries the
+	// item a human acted on.
+	EventSourceConflictDetected EventName = "SourceConflictDetected"
+	EventSourceConflictResolved EventName = "SourceConflictResolved"
+	EventReviewItemResolved     EventName = "ReviewItemResolved"
+
 	// Product and API events.
 	EventSearchExecuted         EventName = "SearchExecuted"
 	EventSearchReturnedNoResult EventName = "SearchReturnedNoResults"

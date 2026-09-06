@@ -24,11 +24,13 @@ func TestLoadsTheRepositoryRegistry(t *testing.T) {
 		t.Fatal("no registry documents loaded")
 	}
 
-	var vendors, products, sources int
+	var vendors, families, products, sources int
 	for _, d := range docs {
 		switch {
 		case d.Vendor != nil:
 			vendors++
+		case d.Family != nil:
+			families++
 		case d.Product != nil:
 			products++
 		case d.Source != nil:
@@ -38,8 +40,9 @@ func TestLoadsTheRepositoryRegistry(t *testing.T) {
 			t.Error("a document was loaded without recording its path; an error would name nothing a contributor can open")
 		}
 	}
-	if vendors == 0 || products == 0 || sources == 0 {
-		t.Errorf("expected at least one of each kind, got %d vendors, %d products, %d sources", vendors, products, sources)
+	if vendors == 0 || families == 0 || products == 0 || sources == 0 {
+		t.Errorf("expected at least one of each kind, got %d vendors, %d families, %d products, %d sources",
+			vendors, families, products, sources)
 	}
 }
 
@@ -222,5 +225,166 @@ func write(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.WriteFile(dir+"/"+name, []byte(strings.TrimLeft(body, "\n")), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
+	}
+}
+
+// A fleet manager holds model numbers, not product names, so a device that loses its
+// model_number alias becomes unreachable by the only string its owner has. Nothing else
+// in the system would notice: the product still resolves by slug, still renders a page
+// and still appears in vendor listings, and only a search for the code stamped on the
+// chassis comes back empty. This test is the thing that notices. See ADR-0024.
+func TestEveryDeviceCarriesAModelNumberAlias(t *testing.T) {
+	t.Parallel()
+	l := registry.New(os.DirFS("../../.."), "dataset")
+	docs, err := l.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	devices := 0
+	for _, d := range docs {
+		if d.Product == nil || !d.Product.IsHardwareModel() {
+			continue
+		}
+		devices++
+		found := false
+		for _, a := range d.Aliases {
+			if a.Kind == domain.AliasModelNumber && a.Alias == d.Product.ModelIdentifier {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s: product %q publishes model identifier %q but declares no model_number alias "+
+				"with that exact text; a fleet inventory pasting the code would match nothing",
+				d.Path, d.Product.Slug, d.Product.ModelIdentifier)
+		}
+	}
+	if devices == 0 {
+		t.Fatal("no hardware models in the committed registry; this test would pass vacuously")
+	}
+}
+
+// A device page whose whole purpose is to say "the firmware is published over there"
+// must actually name a there, and the slug it names must resolve. The loader cannot
+// check the second half -- it parses one file at a time -- so the dataset-wide check
+// lives here rather than in parseProduct.
+func TestDeviceDocumentsDeclareTheOSTheyRun(t *testing.T) {
+	t.Parallel()
+	l := registry.New(os.DirFS("../../.."), "dataset")
+	docs, err := l.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	declared := map[string]bool{}
+	for _, d := range docs {
+		if d.Product != nil {
+			declared[d.Product.Slug] = true
+		}
+	}
+
+	for _, d := range docs {
+		if d.Product == nil || !d.Product.IsHardwareModel() {
+			continue
+		}
+		runsAnOS := false
+		for _, r := range d.Relationships {
+			if r.Kind == domain.RelationRunsOS {
+				runsAnOS = true
+			}
+			// ToProductID still holds the target's registry slug at this stage; the
+			// sync resolves it to an id once every product has been upserted.
+			if !declared[r.ToProductID] {
+				t.Errorf("%s: product %q runs %q, which no registry document declares",
+					d.Path, d.Product.Slug, r.ToProductID)
+			}
+		}
+		if !runsAnOS {
+			t.Errorf("%s: hardware model %q declares no runs_os relationship, so its page would "+
+				"name no operating system and lead nowhere", d.Path, d.Product.Slug)
+		}
+	}
+}
+
+// The relation vocabulary has one member, and a document inventing a second must fail
+// by name rather than be stored as an edge nothing renders.
+func TestRejectsUnknownRelationKind(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write(t, dir, "p.yaml", `
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+metadata: {slug: acme-box, vendor: acme}
+spec:
+  name: Box
+  model_identifier: BOX-1
+  runs:
+    - product: acme-os
+      kind: contains
+`)
+	_, err := registry.New(os.DirFS(dir), ".").Load(context.Background())
+	if err == nil {
+		t.Fatal("an unknown relation kind was accepted")
+	}
+	if !strings.Contains(err.Error(), "contains") {
+		t.Errorf("error does not name the offending kind: %v", err)
+	}
+}
+
+// A runs target that is not even slug-shaped is a contributor typo, and catching it at
+// parse time names the file it is in. A target that IS slug-shaped but names no product
+// is caught later, by the sync, which is the only place that knows every document.
+func TestRejectsMalformedRunsTarget(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write(t, dir, "p.yaml", `
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+metadata: {slug: acme-box, vendor: acme}
+spec:
+  name: Box
+  runs:
+    - product: "Acme OS"
+`)
+	_, err := registry.New(os.DirFS(dir), ".").Load(context.Background())
+	if err == nil {
+		t.Fatal("a runs target that is not a slug was accepted")
+	}
+	if !strings.Contains(err.Error(), "runs.product") {
+		t.Errorf("error does not name the field: %v", err)
+	}
+}
+
+// The relation kind is optional in the file because there is exactly one of them, and
+// making a contributor spell it out on every device would be ceremony. It must still
+// arrive as a real kind rather than as the empty string.
+func TestRunsKindDefaultsToRunsOS(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write(t, dir, "p.yaml", `
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+metadata: {slug: acme-box, vendor: acme}
+spec:
+  name: Box
+  runs:
+    - product: acme-os
+`)
+	docs, err := registry.New(os.DirFS(dir), ".").Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(docs[0].Relationships) != 1 {
+		t.Fatalf("got %d relationships, want 1", len(docs[0].Relationships))
+	}
+	r := docs[0].Relationships[0]
+	if r.Kind != domain.RelationRunsOS {
+		t.Errorf("relation kind = %q, want %q", r.Kind, domain.RelationRunsOS)
+	}
+	if r.ToProductID != "acme-os" {
+		t.Errorf("target = %q, want the unresolved slug %q", r.ToProductID, "acme-os")
+	}
+	if r.ManagedBy != domain.ManagedByRegistry {
+		t.Errorf("managed_by = %q, want %q", r.ManagedBy, domain.ManagedByRegistry)
 	}
 }

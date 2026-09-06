@@ -6,6 +6,28 @@
 # one product per device model, because a single RouterOS release applies across
 # the hardware range -- the per-device distinction that matters (which
 # architecture's image to download) is not a distinct release stream.
+#
+# That reasoning is about the VERSION STREAM, and it is still correct. It says
+# nothing about DISCOVERY, and read alone it used to imply a second claim it does
+# not support: that the hardware needs no entry of its own. It does. A company
+# managing a fleet holds an inventory of model numbers, not of operating systems,
+# and it reaches firmware through those model numbers or not at all -- so a
+# catalogue that registers only RouterOS answers nothing when somebody pastes the
+# code stamped on a switch.
+#
+# So the devices are registered too, in dataset/products/mikrotik/devices/, one
+# document per model, each carrying the vendor's published product code as
+# model_identifier and a `runs` edge pointing back at this product. Those
+# documents deliberately declare NO release stream of their own: the releases
+# live here, which is exactly what this comment's first paragraph says, and the
+# edge is how an operator gets from the model number to them.
+#
+# What the edge does NOT assert is which RouterOS release belongs on a given
+# model. MikroTik publishes no per-model answer that FirmScout has measured, and
+# the API says so in a value (firmwareApplicability.basis = runs_os_unverified)
+# rather than by quietly serving this product's latest version on a device page.
+#
+# See docs/adr/0024-device-first-catalogue.md.
 # =============================================================================
 
 apiVersion: firmscout.dev/v1alpha1

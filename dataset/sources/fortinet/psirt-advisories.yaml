@@ -1,0 +1,91 @@
+# =============================================================================
+# Source: Fortinet PSIRT advisory feed
+# =============================================================================
+# Measured 2026-09-05:
+#   GET https://www.fortiguard.com/rss/ir.xml
+#     -> 302 to https://filestore.fortinet.com/fortiguard/rss/ir.xml
+#   GET https://filestore.fortinet.com/fortiguard/rss/ir.xml
+#     -> 200, content-type: text/xml, content-length: 38414
+#     -> etag: "6a9c3904-960e", last-modified: Sat, 05 Sep 2026 15:45:08 GMT
+#     -> RSS 2.0 (<rss version="2.0">), generator python-feedgen, 50 <item>
+#        elements, each with exactly title, link, description (CDATA), guid and
+#        pubDate -- no category, author or enclosure.
+#     -> every pubDate is RFC 1123 with a real day-month-year and a time
+#        component of exactly 00:00:00 on all 50 items.
+#     -> items are NOT in pubDate order (item 1 is 2022-04-01, items 2 and 3 are
+#        2026-08-12).
+#   GET https://www.fortiguard.com/robots.txt (with a UA header)
+#     -> 200 text/plain: "User-agent: *", "Crawl-delay: 2",
+#        "Disallow: /*?*", "Disallow: /threat-research/data".
+#        Neither Disallow matches /rss/ir.xml.
+#   GET https://filestore.fortinet.com/robots.txt
+#     -> 404. No robots.txt exists on the host this source is registered at, so
+#        no robots rule restricts it.
+#
+# The registered url is the redirect TARGET, not the published address. The
+# published address (www.fortiguard.com/rss/ir.xml) redirects to a different
+# registrable domain, which the fetcher correctly reports as leaving the
+# registered host -- it would put this source into `relocated` on every single
+# check. Registering the measured 200 endpoint avoids a permanent false alarm.
+# The trade is that a change to Fortinet's redirect target has to be noticed by
+# a human rather than followed automatically.
+#
+# ------------------------------- ADR-0018 ------------------------------------
+# This source ships with enabled: false and terms_review_status: pending.
+# robots_policy_status is a mechanical, measured fact and is recorded as one.
+# The terms are NOT: fortinet.com's Legal page ("Limited License") authorises
+# copying site materials "solely for non-commercial use within your
+# organization ... in support of Fortinet products" and forbids public or
+# commercial redistribution without prior written permission. Whether
+# FirmScout's use falls inside or outside that is a legal judgement, and no
+# machine and no maintainer has made it. Until a human does, this source is not
+# collected.
+# -----------------------------------------------------------------------------
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: psirt-advisories
+  vendor: fortinet
+
+spec:
+  product: fortinet-fortios
+  source_type: rss_atom
+  url: https://filestore.fortinet.com/fortiguard/rss/ir.xml
+
+  # Authority
+  official: true
+  quality_class: official_manufacturer
+
+  # Compliance -- see the ADR-0018 note above.
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-05T00:00:00Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: a human must review Fortinet's website terms before this source is
+    enabled. Measured 2026-09-05: robots.txt on www.fortiguard.com permits
+    /rss/ir.xml and filestore.fortinet.com serves no robots.txt (404), so robots
+    imposes no restriction. The Legal page's "Limited License" clause restricts
+    reuse of site materials to non-commercial, in-organisation use in support of
+    Fortinet products and requires written permission for public or commercial
+    redistribution; that clause mentions neither automated access nor feeds.
+    Reconciling it with FirmScout's model is a legal decision that has not been
+    made.
+  authentication_type: none
+
+  # Not collected from until the terms review above is complete.
+  enabled: false
+  health: pending_review
+
+  # Collection
+  collector_id: fortinet.psirt-advisories
+  expected_content_type: text/xml
+
+  # Four checks a day against a 38 KB feed that serves both an ETag and a
+  # Last-Modified, so an unchanged check costs one 304. The minimum interval is
+  # two hours; www.fortiguard.com declares Crawl-delay: 2, which does not apply
+  # to the registered host but is recorded here as the vendor's stated
+  # preference for polite access.
+  check_frequency_seconds: 21600
+  min_frequency_seconds: 7200

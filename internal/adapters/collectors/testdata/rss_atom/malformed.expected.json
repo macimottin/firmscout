@@ -1,0 +1,6 @@
+{
+  "collectorId": "test.rss-basic",
+  "note": "SYNTHETIC. The document is truncated mid-tag (an unclosed <item>, cut off before </channel></rss>). A parse failure is an error, not a warning and not a partial silent result.",
+  "error": "parse feed",
+  "candidates": []
+}

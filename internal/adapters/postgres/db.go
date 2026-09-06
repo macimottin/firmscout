@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -524,6 +525,38 @@ func clampLimit(limit, def, max int) int {
 		return max
 	}
 	return limit
+}
+
+// truncateOnRuneBoundary cuts s to at most maxBytes bytes, moving the cut backwards
+// until it falls between runes.
+//
+// Slicing a Go string at a byte offset is free to land inside a multi-byte rune, and
+// the orphaned continuation bytes that survive are not valid UTF-8. PostgreSQL rejects
+// invalid UTF-8 outright, so an over-long query built that way reaches
+// websearch_to_tsquery and similarity() as a fatal error rather than as a shorter
+// search: a 500 instead of results, for a caller whose only offence was pasting an
+// accented or CJK model name out of an asset register. The bound is a byte count and
+// stays one -- it exists to cap the work a tsquery makes the database do, and bytes are
+// what that costs.
+//
+// This duplicates truncateOnRuneBoundary in internal/application, which
+// SearchProducts.Execute already applies. The copy is deliberate but not preferred: the
+// original is unexported, so importing it is impossible rather than merely disallowed
+// (an adapter may import internal/application, and does), and exporting it is a change
+// to a package this adapter does not own. The duplication is tolerable only because the
+// adapter must hold the bound on its own anyway -- a repository whose input rules are
+// enforced by one of its callers has no rules, which is the exact sentence the
+// application-layer copy was written to answer. If the helper is ever exported, delete
+// this one and call it.
+func truncateOnRuneBoundary(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // ---------------------------------------------------------------------------

@@ -411,3 +411,102 @@ func (r *ProductRepo) ResolveByAlias(ctx context.Context, vendorID, hint string)
 	}
 	return out, wrap("product.ResolveByAlias.rows", rows.Err())
 }
+
+// ---------------------------------------------------------------------------
+// Relationships
+// ---------------------------------------------------------------------------
+
+// ReplaceRelationships makes a product's outgoing relationship set exactly the given
+// list, in one transaction, mirroring ReplaceAliases.
+//
+// Replacement rather than merge, for the reason ReplaceAliases replaces: the registry
+// file is the source of truth, and an edge deleted from that file must stop being
+// asserted rather than linger and keep telling an operator that this box runs an
+// operating system somebody has since retracted.
+//
+// The edge is validated here even though the sync validates it too, and the copy that
+// is checked has FromProductID forced to the parameter. The port takes the owning
+// product as an argument, so a caller has no reason to populate the field on every
+// element, and a Validate that demanded it would reject the natural call. What the
+// check is really for is the invariant the parameter cannot express -- a product
+// running itself, and a relation kind outside the vocabulary -- caught here with a
+// field name rather than downstream as a CHECK violation nothing can attribute to a
+// row.
+func (r *ProductRepo) ReplaceRelationships(ctx context.Context, fromProductID string, rels []domain.ProductRelationship) error {
+	for _, rel := range rels {
+		rel.FromProductID = fromProductID
+		if err := rel.Validate(); err != nil {
+			return err
+		}
+	}
+
+	return r.db.Within(ctx, func(ctx context.Context) error {
+		q := r.db.q(ctx)
+		if _, err := q.Exec(ctx,
+			`DELETE FROM product_relationships WHERE from_product_id = $1`, fromProductID); err != nil {
+			return wrap("product.ReplaceRelationships.delete", err)
+		}
+		for _, rel := range rels {
+			id := rel.ID
+			if id == "" {
+				id = r.db.newID("prl")
+			}
+			managedBy := rel.ManagedBy
+			if managedBy == "" {
+				managedBy = domain.ManagedByRegistry
+			}
+			if _, err := q.Exec(ctx,
+				`INSERT INTO product_relationships (
+                    id, from_product_id, to_product_id, relation_kind, source_note,
+                    managed_by, registry_path
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+				id, fromProductID, rel.ToProductID, string(rel.Kind),
+				nullString(rel.SourceNote), string(managedBy),
+				nullString(rel.RegistryPath)); err != nil {
+				return wrap("product.ReplaceRelationships.insert", err)
+			}
+		}
+		return nil
+	})
+}
+
+// ListRelationships returns a product's outgoing relationships ordered by the target's
+// slug, which makes the output stable for diffing against a registry file.
+//
+// The join to products is what the ordering costs: relationship rows carry an id, and
+// two runs of the same sync mint different ids, so ordering by anything the row itself
+// holds would reorder a diff for no reason.
+func (r *ProductRepo) ListRelationships(ctx context.Context, fromProductID string) ([]domain.ProductRelationship, error) {
+	rows, err := r.db.q(ctx).Query(ctx,
+		`SELECT pr.id, pr.from_product_id, pr.to_product_id, pr.relation_kind,
+                pr.source_note, pr.managed_by, pr.registry_path
+           FROM product_relationships pr
+           JOIN products tp ON tp.id = pr.to_product_id
+          WHERE pr.from_product_id = $1
+          ORDER BY tp.slug`, fromProductID)
+	if err != nil {
+		return nil, wrap("product.ListRelationships", err)
+	}
+	defer rows.Close()
+
+	var out []domain.ProductRelationship
+	for rows.Next() {
+		var (
+			rel          domain.ProductRelationship
+			kind         string
+			sourceNote   *string
+			managedBy    string
+			registryPath *string
+		)
+		if err := rows.Scan(&rel.ID, &rel.FromProductID, &rel.ToProductID, &kind,
+			&sourceNote, &managedBy, &registryPath); err != nil {
+			return nil, wrap("product.ListRelationships.scan", err)
+		}
+		rel.Kind = domain.RelationKind(kind)
+		rel.SourceNote = str(sourceNote)
+		rel.ManagedBy = domain.ManagedBy(managedBy)
+		rel.RegistryPath = str(registryPath)
+		out = append(out, rel)
+	}
+	return out, wrap("product.ListRelationships.rows", rows.Err())
+}

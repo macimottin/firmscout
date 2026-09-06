@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Test Vendor Thing Releases</title>
+    <item>
+      <title>Test Vendor Thing 7.24.2 released</title>
+      <link>https://example.test/releases/7.24.2</link>
+      <pubDate>Thu, 03 Sep 2026 00:00:00 -0700</pubDate>
+    <!-- item deliberately never closed, and the document is cut off mid-tag to
+         simulate a truncated fetch or a vendor feed that shipped broken XML. -->

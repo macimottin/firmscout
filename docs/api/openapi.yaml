@@ -58,10 +58,13 @@ paths:
         - name: q
           in: query
           required: true
-          description: Search query, 1-200 characters.
+          description: >-
+            Search query, 2-200 characters. A shorter query matches most of
+            the catalogue and is refused; a longer one is truncated to 200
+            bytes of UTF-8 on a character boundary rather than rejected.
           schema:
             type: string
-            minLength: 1
+            minLength: 2
             maxLength: 200
         - name: limit
           in: query
@@ -85,12 +88,17 @@ paths:
             X-RateLimit-Remaining: { $ref: "#/components/headers/XRateLimitRemaining" }
             X-RateLimit-Reset: { $ref: "#/components/headers/XRateLimitReset" }
             Cache-Control: { $ref: "#/components/headers/CacheControlShort" }
+            Vary: { $ref: "#/components/headers/Vary" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SearchResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -122,10 +130,15 @@ paths:
           headers:
             X-Request-Id: { $ref: "#/components/headers/XRequestId" }
             Cache-Control: { $ref: "#/components/headers/CacheControlLong" }
+            Vary: { $ref: "#/components/headers/Vary" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/VendorListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -146,12 +159,17 @@ paths:
             X-Request-Id: { $ref: "#/components/headers/XRequestId" }
             ETag: { $ref: "#/components/headers/ETag" }
             Cache-Control: { $ref: "#/components/headers/CacheControlLong" }
+            Vary: { $ref: "#/components/headers/Vary" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Vendor"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -160,6 +178,27 @@ paths:
       operationId: getProduct
       tags: [products]
       summary: Get a product by slug
+      description: >-
+        One route serves software products and hardware models alike. A
+        hardware model is a product whose `modelIdentifier` is the vendor's
+        published product code; it usually publishes no release stream of
+        its own, so `latestRelease` is null and `runs` names the operating
+        system whose releases are the ones being looked for.
+
+
+        `firmwareApplicability` is always present and answers two
+        independent questions. `verified`/`basis` answer "which of another
+        product's releases apply to this exact model" — for a device,
+        `{"verified": false, "basis": "runs_os_unverified"}`: FirmScout
+        records that the device runs that operating system and has **not**
+        established which of its releases are the right image for this
+        exact model. `ownReleases` separately answers "are the releases in
+        this response this product's own". The two are kept apart because a
+        product can be both a hardware model and its own release stream — a
+        rack server is a device AND publishes BIOS versions — and a single
+        scalar made the device half vouch for the operating-system half.
+        Reading the operating system's `latestRelease` as this device's
+        answer is the mistake this object exists to prevent. See ADR-0024.
       security:
         - {}
         - ApiKeyAuth: []
@@ -172,12 +211,17 @@ paths:
             X-Request-Id: { $ref: "#/components/headers/XRequestId" }
             ETag: { $ref: "#/components/headers/ETag" }
             Cache-Control: { $ref: "#/components/headers/CacheControlLong" }
+            Vary: { $ref: "#/components/headers/Vary" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Product"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -189,7 +233,28 @@ paths:
       description: >-
         Free and anonymous responses are windowed to the most recent 12
         months regardless of limit/cursor reach; Professional and above
-        receive unwindowed, complete history.
+        receive unwindowed, complete history. The response's `window`
+        member states which was applied, so a truncated history is never
+        mistaken for a short one, and `window.latestOutsideWindow` says
+        when an empty page is the window's doing rather than a product
+        that never shipped.
+
+
+        The window is applied by the query. The `channel` and
+        `releaseType` filters are not: they narrow the page after the
+        query has run and after its next cursor was minted, so **a
+        filtered page can be empty while `nextCursor` is non-null**.
+        Page until `nextCursor` is null rather than stopping at the first
+        empty page.
+
+
+        **Sorting is page-local.** Pagination is always by first-observed
+        time descending, which is the pair the cursor is built from.
+        `sort` and `order` reorder the rows within each returned page and
+        do not change which rows fall on which page, so `order=asc`
+        returns the newest page first with its rows ascending inside it.
+        A consumer that needs the whole history in a particular order must
+        page to the end and sort the result.
       security:
         - {}
         - ApiKeyAuth: []
@@ -211,6 +276,8 @@ paths:
           description: >-
             Releases are never sorted by version string (blueprint 3.5,
             ADR-0017) -- only these two fields are valid sort keys.
+            Applied to each returned page, not to the history: see the
+            endpoint description.
           schema:
             type: string
             enum: [releaseDate, firstObservedAt]
@@ -241,12 +308,17 @@ paths:
           headers:
             X-Request-Id: { $ref: "#/components/headers/XRequestId" }
             Cache-Control: { $ref: "#/components/headers/CacheControlMedium" }
+            Vary: { $ref: "#/components/headers/Vary" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReleaseListResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -255,6 +327,29 @@ paths:
       operationId: getLatestRelease
       tags: [products, releases]
       summary: Get the latest observed release for a product
+      description: >-
+        The answer to "what version should I be on?", with the two members
+        that make it honest: `hasSourceConflict`, true when eligible
+        sources disagree about this product and no human has resolved it
+        (ADR-0020), and `recommendedRelease`, the vendor's own designation
+        or null when it never made one.
+
+
+        This endpoint is never windowed. A plan bounds how much *history*
+        a caller receives; the newest observed release is the current
+        answer, not history, and reporting "no published release" for a
+        discontinued product that plainly has one would be false. An
+        anonymous caller can therefore see a release here and an empty
+        page from /products/{slug}/releases: that page says so through
+        `window.latestOutsideWindow`.
+
+
+        A hardware model with no release stream of its own answers **404
+        here, by design**. No release is mapped to it, and inheriting its
+        operating system's newest version would tell an operator to flash
+        an image FirmScout never established their hardware takes. The
+        product response's `runs` array says where the releases actually
+        are. See ADR-0024.
       security:
         - {}
         - ApiKeyAuth: []
@@ -273,12 +368,17 @@ paths:
             X-Request-Id: { $ref: "#/components/headers/XRequestId" }
             ETag: { $ref: "#/components/headers/ETag" }
             Cache-Control: { $ref: "#/components/headers/CacheControlMedium" }
+            Vary: { $ref: "#/components/headers/Vary" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LatestReleaseResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -304,34 +404,105 @@ paths:
             X-Request-Id: { $ref: "#/components/headers/XRequestId" }
             ETag: { $ref: "#/components/headers/ETag" }
             Cache-Control: { $ref: "#/components/headers/CacheControlImmutable" }
+            Vary: { $ref: "#/components/headers/Vary" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Release"
         "404":
           $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
+  # The three infrastructure endpoints are served from the host root, not from under
+  # /api/v1: they are not part of the versioned contract and never change with it. The
+  # path-level `servers` override says so precisely, rather than leaving a reader to
+  # infer that one path in this document ignores the document's own base URL.
   /healthz:
+    servers:
+      - url: https://api.firmscout.dev
+        description: Production (infrastructure endpoints sit outside /api/v1)
+      - url: http://localhost:8080
+        description: Local development
     get:
       operationId: healthz
       tags: [system]
       summary: Liveness probe
+      description: >-
+        Answers 200 unconditionally and touches no dependency. A liveness
+        probe that checked the database would restart every instance during
+        a database incident, turning a degraded read path into a crash loop.
+        Readiness answers the other question.
       security: []
       responses:
         "200":
           description: The process is up.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /readyz:
+    servers:
+      - url: https://api.firmscout.dev
+        description: Production (infrastructure endpoints sit outside /api/v1)
+      - url: http://localhost:8080
+        description: Local development
+    get:
+      operationId: readyz
+      tags: [system]
+      summary: Readiness probe
+      description: >-
+        Runs the deployment's readiness gate, in production a database ping,
+        and answers 503 with a problem document when it fails so a load
+        balancer takes the instance out of rotation without the process
+        being restarted.
+      security: []
+      responses:
+        "200":
+          description: This instance can serve traffic.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/CacheControlNoStore" }
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
         "503":
-          description: The process is up but not ready to serve traffic.
+          description: A dependency required to serve requests is unavailable.
           content:
-            application/json:
+            application/problem+json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                $ref: "#/components/schemas/Problem"
+
+  /metrics:
+    servers:
+      - url: https://api.firmscout.dev
+        description: Production (infrastructure endpoints sit outside /api/v1)
+      - url: http://localhost:8080
+        description: Local development
+    get:
+      operationId: metrics
+      tags: [system]
+      summary: Prometheus exposition
+      description: >-
+        The scrape endpoint. It is neither authenticated, metered nor rate
+        limited -- a probe that gets a 429 during an incident makes the
+        incident worse -- and it is expected to be reachable only from the
+        monitoring network.
+      security: []
+      responses:
+        "200":
+          description: The Prometheus text exposition.
+          content:
+            text/plain:
+              schema:
+                type: string
 
 components:
   securitySchemes:
@@ -372,25 +543,57 @@ components:
       schema:
         type: string
     CacheControlShort:
-      description: Short-lived cache policy (search results).
+      description: >-
+        Short-lived cache policy (search results), for an anonymous caller.
+        A request that presented a credential receives "private, no-store"
+        instead -- see CacheControlAuthenticated.
       schema:
         type: string
         example: "public, max-age=60"
     CacheControlMedium:
-      description: Medium cache policy, invalidated on publish.
+      description: >-
+        Medium cache policy, invalidated on publish, for an anonymous
+        caller. A request that presented a credential receives
+        "private, no-store" instead -- see CacheControlAuthenticated.
       schema:
         type: string
         example: "public, max-age=300"
     CacheControlLong:
-      description: Long cache policy, invalidated on publish.
+      description: >-
+        Long cache policy, invalidated on publish, for an anonymous caller.
+        A request that presented a credential receives "private, no-store"
+        instead -- see CacheControlAuthenticated.
       schema:
         type: string
         example: "public, max-age=3600"
     CacheControlImmutable:
-      description: Immutable, cacheable forever.
+      description: >-
+        Immutable, cacheable forever, for an anonymous caller. A request
+        that presented a credential receives "private, no-store" instead:
+        the rule is uniform across endpoints because a per-endpoint
+        exception fails silently when it is wrong, and even an immutable
+        body ships with that caller's own rate-limit and quota counters.
       schema:
         type: string
         example: "public, max-age=31536000, immutable"
+    CacheControlAuthenticated:
+      description: >-
+        What every cacheable endpoint returns when the request presented an
+        Authorization bearer token or an X-API-Key, whatever the route's own
+        policy is. Vary is not trusted as the sole partition, because its
+        correctness depends on every layer agreeing and CloudFront honours
+        Vary only for Accept-Encoding; a tier-dependent body must therefore
+        not be storable by a shared cache at all. The ETag is still issued,
+        so a caller can revalidate a copy it holds itself. See
+        security.md 4.10 (T-13).
+      schema:
+        type: string
+        example: "private, no-store"
+    CacheControlNoStore:
+      description: Never cached, by any cache, at any layer.
+      schema:
+        type: string
+        example: "no-store"
     XRateLimitLimit:
       schema: { type: integer }
     XRateLimitRemaining:
@@ -398,6 +601,20 @@ components:
     XRateLimitReset:
       description: Unix timestamp when the rate-limit window resets.
       schema: { type: integer }
+    Vary:
+      description: >-
+        Always "Authorization, X-API-Key" on a cacheable response, as the
+        second line of defence rather than the first: an authenticated
+        response is already private, no-store, and this is what stops a
+        layer that ignores no-store, or a shared anonymous entry, from being
+        reused for a caller who sent a credential. It is set on every
+        cacheable response rather than only the tier-dependent one, because
+        getting a per-endpoint decision wrong fails silently, and the
+        traffic that matters for hit rate -- the public website -- sends
+        neither header, so anonymous responses still share one cache entry.
+      schema:
+        type: string
+        example: "Authorization, X-API-Key"
     RetryAfter:
       description: Seconds until a retry is likely to succeed.
       schema: { type: integer }
@@ -405,6 +622,29 @@ components:
   responses:
     BadRequest:
       description: The request was invalid.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: >-
+        A credential was presented and could not be used. The `type` member
+        separates the two cases: `unauthorized` when nothing usable was sent
+        (an Authorization header that is not a bearer token) or the
+        deployment cannot check keys at all, and `invalid-api-key` when a
+        well-formed key does not resolve to a live, non-revoked row. These
+        are read endpoints, so sending no credential at all is not an error
+        -- it is the anonymous caller the public website uses.
+      headers:
+        X-Request-Id: { $ref: "#/components/headers/XRequestId" }
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: The key's account is not active, or its plan does not reach this endpoint.
       headers:
         X-Request-Id: { $ref: "#/components/headers/XRequestId" }
       content:
@@ -460,18 +700,57 @@ components:
 
     ProductSummary:
       type: object
+      description: >-
+        A product reference a consumer can follow: slug and name are both
+        guaranteed. Every producer of this shape resolves a real product row —
+        a `runs` entry with no slug is dropped by the presenter rather than
+        rendered as an unfollowable name.
       required: [slug, name]
       properties:
         slug: { type: string, example: mikrotik-routeros }
         name: { type: string, example: RouterOS }
 
+    ProductFamilySummary:
+      type: object
+      # slug is deliberately NOT required, and it is never sent. A family slug is
+      # unique per vendor rather than globally and there is no family route for one to
+      # resolve on, so ProductDTO's family carries a name alone (api.md 3.2, ADR-0024).
+      # This is a separate schema from ProductSummary rather than a relaxation of it:
+      # weakening ProductSummary would drop the slug guarantee from `runs`, which is
+      # the one array whose whole purpose is being followable.
+      description: >-
+        A product family reference. It carries a name and no slug: family slugs
+        are unique per vendor rather than globally and no route resolves one, so
+        a slug here would be an identifier that points at nothing.
+      required: [name]
+      properties:
+        name: { type: string, example: "ARM 32bit" }
+
     Vendor:
       type: object
-      required: [slug, name, website, productCount, lastVerifiedAt]
+      # productCount and lastVerifiedAt are aggregate facts domain.Vendor does not
+      # carry, so PresentVendor has never sent either and VendorDTO types both as
+      # omitempty pointers on purpose ("an absent key says 'not known here'; a zero
+      # productCount would say 'this vendor has no products', which is a different and
+      # usually false claim"). Listing them as required documented a contract the API
+      # has never honoured, and a client that believed it crashed on the first vendor
+      # it rendered. They stay in properties, described as optional, so that the read
+      # model which will supply them has a declared shape to fill.
+      # website joins them, for the same reason and by the same class of error: a
+      # vendor whose registry document sets no homepage_url has never had the key sent,
+      # because VendorDTO.Website is omitempty, and packages/schemas/vendor.schema.json
+      # does not require homepage_url either. Demonstrated against the running API.
+      required: [slug, name]
       properties:
         slug: { type: string, example: mikrotik }
         name: { type: string, example: MikroTik }
-        website: { type: string, format: uri, example: "https://mikrotik.com" }
+        website:
+          type: string
+          format: uri
+          example: "https://mikrotik.com"
+          description: >-
+            The vendor's homepage. Omitted entirely when the registry records
+            none — never an empty string.
         productCount: { type: integer, minimum: 0 }
         lastVerifiedAt: { type: string, format: date-time }
 
@@ -492,13 +771,59 @@ components:
         kind: { $ref: "#/components/schemas/SourceKind" }
         official: { type: boolean }
 
+    Conflict:
+      type: object
+      description: >-
+        The specific disagreement behind hasSourceConflict: which channel and
+        versions are disputed, how many sources report a value FirmScout does
+        not outrank, and when it was first detected (ADR-0020). Additive
+        alongside hasSourceConflict, never a replacement for it -- hasSourceConflict
+        answers "is something disputed", this answers "what, exactly". It is
+        `null` whenever hasSourceConflict is false, and it is also `null`,
+        honestly rather than defensively, for a product computed before this
+        field existed or for a conflict the detector has not finished
+        recording a channel and versions for: FirmScout never fabricates a
+        detail object just to make the two fields agree.
+      # channel is required because it is always sent: the empty string here is a real,
+      # documented value ("the disputing sources stated no channel"), and ProductConflictDTO
+      # carries no omitempty on it precisely so that value survives to the wire.
+      required: [channel, versions, sourceCount, detectedAt]
+      properties:
+        channel:
+          type: string
+          description: Empty when the disputing sources stated no channel.
+          example: stable
+        versions:
+          type: array
+          items: { type: string }
+          minItems: 2
+          description: >-
+            The normalised versions in dispute, sorted -- always at least two,
+            since a disagreement with one participant is not one.
+          example: ["7.24.1", "7.24.2"]
+        sourceCount:
+          type: integer
+          minimum: 2
+          description: >-
+            How many sources are party to the disagreement. Their identities
+            are internal registry detail, not something a public consumer
+            acts on, so only the count is exposed.
+          example: 2
+        detectedAt: { type: string, format: date-time }
+
     ReleaseSummary:
       type: object
-      required: [id, rawVersion, channel, releaseDatePrecision]
+      # channel is omitted, not empty, when the release carries none -- the field is
+      # omitempty on both ReleaseSummaryDTO and ReleaseDTO -- so requiring it documented
+      # a contract the API does not honour. Same correction class as releaseType,
+      # lastVerifiedAt, productCount, category and website elsewhere in this document.
+      required: [id, rawVersion, releaseDatePrecision]
       properties:
         id: { type: string, example: "rel_01J8Z3K9QWERTYUIOPASDFGH" }
         rawVersion: { type: string, example: "7.24.2" }
-        channel: { $ref: "#/components/schemas/Channel" }
+        channel:
+          allOf: [{ $ref: "#/components/schemas/Channel" }]
+          description: Omitted entirely when the release states no channel.
         releaseDate:
           type: string
           description: >-
@@ -507,10 +832,98 @@ components:
           example: "2026-09-02"
         releaseDatePrecision: { $ref: "#/components/schemas/DatePrecision" }
 
+    OwnReleases:
+      type: object
+      required: [mapped, releaseCount]
+      description: >-
+        Whether the releases this response carries are mapped to this product
+        itself, and how many there are. A mapping fact, not a verification —
+        which is why the key is `mapped` and not `verified`. See Applicability.
+      properties:
+        mapped:
+          type: boolean
+          description: >-
+            True when at least one non-withdrawn release is mapped to this
+            product, so `latestRelease` and GET /products/{slug}/releases are
+            this product's own releases rather than empty.
+        releaseCount:
+          type: integer
+          minimum: 0
+          description: How many non-withdrawn releases are mapped to this product.
+
+    Applicability:
+      type: object
+      required: [verified, basis, ownReleases]
+      description: >-
+        Whether the releases this response carries are known to apply to this
+        product. Always present, never an omitted key: an absent value would
+        read as "they apply", and "we have not verified which firmware image
+        this model takes" is a different claim from "every release of its
+        operating system applies". See ADR-0024.
+
+
+        It answers two independent questions and keeps them apart. `verified`
+        and `basis` answer "which of another product's releases apply to this
+        exact model"; `ownReleases` answers "are the releases shown here this
+        product's own". A product can need both answered — a rack server is a
+        device AND publishes its own BIOS versions — and collapsing them into
+        one scalar made the device half of such a product silently vouch for
+        the operating-system half.
+      properties:
+        verified:
+          type: boolean
+          description: >-
+            True only when no unestablished applicability claim stands against
+            the releases this response carries. A release mapped to this
+            product never sets it: `basis` is decided by the `runs` edge first,
+            so a product that publishes its own releases AND runs an operating
+            system reports false, with `ownReleases.mapped` true beside it.
+        basis:
+          enum: [own_releases, runs_os_unverified, none_recorded]
+          description: >-
+            own_releases — no other product's releases are in play: releases are
+            mapped to this product and it runs nothing catalogued here, so no
+            per-model question is open. runs_os_unverified — this product runs an
+            operating system that publishes releases and FirmScout has not
+            established which of them apply to this exact model; it says nothing
+            about whether this product also publishes releases of its own, which
+            `ownReleases` answers separately. none_recorded — neither is true yet.
+        ownReleases: { $ref: "#/components/schemas/OwnReleases" }
+
     Product:
       type: object
+      # releaseType and lastVerifiedAt are deliberately NOT required, and their absence
+      # from this list is a correction rather than an omission. Both were listed as
+      # required while every catalogued product was a software product that had a
+      # release stream and a collector that had checked it. A hardware model has
+      # neither -- its releases belong to the operating system it runs, and its facts
+      # come from the reviewed registry rather than from a source check -- so the
+      # handler omits both keys for a device (ADR-0024 D1, D4). Leaving them required
+      # would document a contract the API does not honour, which is worse than the bug
+      # it hides: a generated client would type them non-optional and 500 on the first
+      # device, which is exactly what happened to the web app's product and search
+      # pages before this was corrected.
+      # category joins them, and by the same demonstration: a product whose registry
+      # document carries no category_slugs has never had the key sent, because
+      # ProductDTO.Category is omitempty and packages/schemas/product.schema.json makes
+      # category_slugs optional.
+      #
+      # latestRelease, conflict and aliases are ADDED, which is the same correction in
+      # the other direction: all three carry no omitempty and are sent on every product
+      # -- an explicit null, an explicit null and an empty array -- and leaving them out
+      # of this list understated a guarantee the API does keep.
       required:
-        [slug, name, vendor, category, releaseType, officialSources, lastVerifiedAt]
+        - slug
+        - name
+        - vendor
+        - modelIdentifier
+        - runs
+        - aliases
+        - firmwareApplicability
+        - latestRelease
+        - officialSources
+        - hasSourceConflict
+        - conflict
       properties:
         slug: { type: string, example: mikrotik-routeros }
         name: { type: string, example: RouterOS }
@@ -518,8 +931,42 @@ components:
         family:
           oneOf:
             - { type: "null" }
-            - { $ref: "#/components/schemas/ProductSummary" }
-        category: { type: string, example: network_device_os }
+            - { $ref: "#/components/schemas/ProductFamilySummary" }
+        modelIdentifier:
+          description: >-
+            The vendor's own product code for a hardware model — the string a
+            fleet inventory holds — or null. Always present: a consumer must be
+            able to tell "this is not a hardware model" from a key that was
+            simply not sent.
+          oneOf:
+            - { type: "null" }
+            - { type: string, example: CRS328-24P-4S+RM }
+        runs:
+          type: array
+          description: >-
+            Products this product runs, most usefully the operating system a
+            hardware model runs. A navigation claim only: it says where the
+            releases are published, never which of them apply to this model.
+            Empty rather than null when there are none.
+          items: { $ref: "#/components/schemas/ProductSummary" }
+        aliases:
+          type: array
+          description: >-
+            Other strings this product is known by — marketing names, typeable
+            spellings, and above all the vendor's model number, which is the
+            string a fleet inventory holds and, per ADR-0024, the thing that
+            makes a device findable at all. Raw alias text, never the normalised
+            form. Empty rather than null when there are none.
+          items: { type: string }
+          example: ["C53UiG+5HPaxD2HPaxD", "hAP ax3"]
+        firmwareApplicability:
+          $ref: "#/components/schemas/Applicability"
+        category:
+          type: string
+          example: network_device_os
+          description: >-
+            The product's first category slug. Omitted entirely for a product in
+            no category — never an empty string.
         releaseType: { type: string, example: embedded_os }
         latestRelease:
           oneOf:
@@ -528,13 +975,34 @@ components:
         officialSources:
           type: array
           items: { $ref: "#/components/schemas/OfficialSource" }
+        hasSourceConflict:
+          type: boolean
+          description: >-
+            True when eligible sources disagree about this product's newest
+            version and no human has resolved it yet (ADR-0020). Always
+            present: an absent key would read as "no conflict", and "we
+            checked and they agree" is a different claim from "we did not
+            check".
+        conflict:
+          description: >-
+            The detail behind hasSourceConflict when there is any to give;
+            null otherwise. See Conflict.
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/Conflict" }
         lastVerifiedAt: { type: string, format: date-time }
 
     Evidence:
       type: object
-      required: [retrievedAt, excerpt]
+      # retrievedAt is omitted when the evidence row records no retrieval instant --
+      # EvidenceDTO.RetrievedAt is an omitempty pointer, rendering an absent key rather
+      # than the year 1 -- so requiring it claimed a guarantee the API does not make.
+      required: [excerpt]
       properties:
-        retrievedAt: { type: string, format: date-time }
+        retrievedAt:
+          type: string
+          format: date-time
+          description: Omitted when no retrieval instant was recorded.
         excerpt:
           type: string
           maxLength: 500
@@ -550,28 +1018,39 @@ components:
 
     Release:
       type: object
+      # product, channel, firstObservedAt and lastVerifiedAt are all omitempty on
+      # ReleaseDTO and all four are genuinely omitted in reachable cases: `product` on
+      # LatestReleaseResponse.latestRelease (the enclosing object already names the
+      # product) and on GET /releases/{id} when the mapping was deleted out from under
+      # the release, `channel` when the release states none, and the two timestamps when
+      # nothing recorded them. Requiring them documented a contract the API does not
+      # honour, which is the class of lie already corrected for releaseType,
+      # lastVerifiedAt on Product, productCount, category and website.
       required:
         - id
-        - product
         - rawVersion
         - normalizedVersion
         - releaseType
-        - channel
         - releaseDatePrecision
         - recommended
         - withdrawn
         - correctsReleaseId
         - source
         - evidence
-        - firstObservedAt
-        - lastVerifiedAt
       properties:
         id: { type: string, example: "rel_01J8Z3K9QWERTYUIOPASDFGH" }
-        product: { $ref: "#/components/schemas/ProductSummary" }
+        product:
+          description: >-
+            The product this release belongs to. Omitted where the enclosing
+            object already names it, and where it could not be resolved — never
+            filled in with a guess.
+          allOf: [{ $ref: "#/components/schemas/ProductSummary" }]
         rawVersion: { type: string, example: "7.24.2" }
         normalizedVersion: { type: string, example: "7.24.2" }
         releaseType: { type: string, example: embedded_os }
-        channel: { $ref: "#/components/schemas/Channel" }
+        channel:
+          allOf: [{ $ref: "#/components/schemas/Channel" }]
+          description: Omitted entirely when the release states no channel.
         releaseDate:
           type: string
           description: >-
@@ -591,25 +1070,119 @@ components:
             - { type: string }
         source: { $ref: "#/components/schemas/ReleaseSource" }
         evidence: { $ref: "#/components/schemas/Evidence" }
-        firstObservedAt: { type: string, format: date-time }
-        lastVerifiedAt: { type: string, format: date-time }
+        firstObservedAt:
+          type: string
+          format: date-time
+          description: Omitted when nothing recorded a first observation.
+        lastVerifiedAt:
+          type: string
+          format: date-time
+          description: Omitted when no source check has verified this release.
+
+    HistoryWindow:
+      type: object
+      description: >-
+        Whether this page of history is the whole archive or a slice of it.
+        api.md 1 forbids hiding a field from a tier; it does not forbid
+        windowing, but a consumer who cannot distinguish a windowed history
+        from a complete one has been misled by omission. Always present.
+      required: [windowed]
+      properties:
+        windowed:
+          type: boolean
+          description: >-
+            True for anonymous, free, and any unrecognised plan; false for
+            Professional and above.
+        since:
+          type: string
+          format: date-time
+          description: >-
+            The earliest release this page could contain. Present only when
+            windowed is true.
+
+
+            The comparison is over-inclusive by design. A release whose date
+            the vendor published at month or year precision is tested at the
+            *end* of the period that precision denotes, not at its stored
+            anchor, and both sides are reduced to a UTC calendar day. So a
+            release dated "2025" is inside a window opening 2025-09-05,
+            because the vendor may have shipped it in December; a release
+            dated "2025-09" is inside it for the same reason; and a release
+            dated exactly 2025-09-05 is inside it, while 2025-09-04 is not.
+            Treating the stored 1 January or day-1 anchor as the date would
+            assert a day the vendor never published (ADR-0017) and would
+            silently drop releases the caller is entitled to see. Showing one
+            extra release discloses nothing a coarser precision did not
+            already disclose; hiding one is a correctness failure the page
+            cannot reveal.
+          example: "2025-09-05T00:00:00Z"
+        latestOutsideWindow:
+          type: boolean
+          description: >-
+            True when this product's newest observed release is older than
+            `since`, which is what makes an empty page readable: the product
+            did not stop shipping, its history simply predates the window,
+            and GET /products/{slug}/latest still reports that release
+            because it is never windowed. Present only when windowed is
+            true. It is claimed only when the vendor's own date puts the
+            release outside at every precision that date could denote, and it
+            applies exactly the comparison `since` describes -- period end
+            against the boundary's UTC calendar day -- so the flag and the
+            page can never contradict each other. An undated release is never
+            claimed at all: those are windowed by first-observed time, which
+            this response does not carry.
+        detail:
+          type: string
+          description: >-
+            A sentence naming the plan that lifts the window, and naming the
+            latest-release endpoint when latestOutsideWindow is true.
+            Present only when windowed is true.
 
     ReleaseListResponse:
       type: object
-      required: [releases, pagination]
+      required: [releases, pagination, window]
       properties:
         releases:
           type: array
           items: { $ref: "#/components/schemas/Release" }
         pagination: { $ref: "#/components/schemas/Pagination" }
+        window: { $ref: "#/components/schemas/HistoryWindow" }
 
     LatestReleaseResponse:
       type: object
-      required: [vendor, product, latestRelease]
+      # conflict is required because it is always sent: LatestReleaseResponse.Conflict
+      # carries no omitempty, so it is an explicit null rather than a dropped key, the
+      # same rule Product.conflict follows.
+      required: [vendor, product, latestRelease, recommendedRelease, hasSourceConflict, conflict]
       properties:
         vendor: { $ref: "#/components/schemas/VendorSummary" }
         product: { $ref: "#/components/schemas/ProductSummary" }
         latestRelease: { $ref: "#/components/schemas/Release" }
+        recommendedRelease:
+          description: >-
+            The vendor's own designated release, or null when the vendor
+            never designated one. It is a separate member from latestRelease
+            because the two are often different releases: the newest version
+            is not automatically the safest, and FirmScout never substitutes
+            one for the other.
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/Release" }
+        hasSourceConflict:
+          type: boolean
+          description: >-
+            True when eligible sources disagree about this product's newest
+            version and no human has resolved it yet (ADR-0020). Always
+            present: this is the endpoint that answers "what version should I
+            be on?", and returning a contested version with no flag to check
+            is the outcome recording a disagreement exists to prevent.
+        conflict:
+          description: >-
+            The detail behind hasSourceConflict when there is any to give;
+            null otherwise. Same meaning as Product.conflict. See Conflict.
+          oneOf:
+            - { type: "null" }
+            - { $ref: "#/components/schemas/Conflict" }
 
     SearchResultItem:
       type: object
@@ -620,6 +1193,13 @@ components:
           enum: [product, vendor]
         slug: { type: string }
         name: { type: string }
+        modelIdentifier:
+          type: string
+          description: >-
+            The vendor's product code, echoed back on a hit so a fleet manager
+            who pasted the string stamped on the chassis can see this row is the
+            thing they hold. Omitted for products that are not hardware models.
+          example: CRS328-24P-4S+RM
         vendor:
           oneOf:
             - { type: "null" }
@@ -665,6 +1245,22 @@ components:
         type:
           type: string
           format: uri
+          description: >-
+            One of the catalogue in docs/architecture/api.md 6. The set is
+            closed: a consumer may branch on these values, and a URI is
+            never respelled without a version bump.
+          enum:
+            - "https://firmscout.dev/problems/not-found"
+            - "https://firmscout.dev/problems/invalid-parameter"
+            - "https://firmscout.dev/problems/validation-failed"
+            - "https://firmscout.dev/problems/unauthorized"
+            - "https://firmscout.dev/problems/invalid-api-key"
+            - "https://firmscout.dev/problems/forbidden"
+            - "https://firmscout.dev/problems/conflict"
+            - "https://firmscout.dev/problems/rate-limited"
+            - "https://firmscout.dev/problems/quota-exceeded"
+            - "https://firmscout.dev/problems/internal-error"
+            - "https://firmscout.dev/problems/service-unavailable"
           example: "https://firmscout.dev/problems/not-found"
         title: { type: string, example: "Resource not found" }
         status: { type: integer, example: 404 }

@@ -1,0 +1,8 @@
+{
+  "collectorId": "test.rss-basic",
+  "note": "SYNTHETIC. A feed with no items is a valid feed: zero candidates, a warning, no error.",
+  "warningsContain": [
+    "contains 0 item elements"
+  ],
+  "candidates": []
+}

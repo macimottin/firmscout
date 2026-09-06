@@ -49,7 +49,7 @@ docker compose -f infrastructure/docker/docker-compose.yml up -d postgres
 go run ./apps/cli migrate up
 ```
 
-The full local workflow, once it exists end to end, is in the [README Quick start](README.md#quick-start-target-local-development-workflow) — note the honesty caveat there: some of this is describing the target shape of the repository, not something you can run today.
+The full local workflow, once it exists end to end, is in the [README Quick start](README.md#quick-start) — note the honesty caveat there: some of this is describing the target shape of the repository, not something you can run today.
 
 ### Running tests
 

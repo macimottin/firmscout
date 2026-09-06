@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 
@@ -168,19 +170,47 @@ type htmlContainer struct {
 }
 
 // value locates a field's raw text within this container.
-func (c *htmlContainer) value(f *FieldSpec) (string, bool) {
+func (c *htmlContainer) value(f *FieldSpec) (string, bool, error) {
 	target := c.sel
 	if !f.scope {
-		target = c.sel.FindMatcher(f.sel).First()
-		if target.Length() == 0 {
-			return "", false
+		matches := c.sel.FindMatcher(f.sel)
+		switch {
+		case matches.Length() == 0:
+			return "", false, nil
+		case matches.Length() > 1 && f.Multiple == MultipleError:
+			// The page said several things and the config declared no way to choose.
+			// Taking the first would be a guess by document order, which is how four
+			// MikroTik long-term releases were once recorded as stable: their entries
+			// carry a Stable badge and a Long-term badge, and Stable is rendered
+			// first. Naming what matched is what makes that diagnosable in one read
+			// of the log instead of one afternoon of bisecting the catalogue.
+			return "", false, fmt.Errorf("selector %q matched %d elements (%s); "+
+				"set multiple: %s to take the first deliberately",
+				f.Selector, matches.Length(), matchSummary(matches), MultipleFirst)
 		}
+		target = matches.First()
 	}
 	if f.Attribute != "" {
 		v, ok := target.Attr(f.Attribute)
-		return v, ok
+		return v, ok, nil
 	}
-	return target.Text(), true
+	return target.Text(), true, nil
+}
+
+// matchSummary renders what a multi-match selector actually found, so the error names
+// the ambiguity rather than only its arity.
+func matchSummary(sel *goquery.Selection) string {
+	const max = 4
+	var seen []string
+	sel.EachWithBreak(func(i int, s *goquery.Selection) bool {
+		seen = append(seen, strconv.Quote(collapseWhitespace(s.Text())))
+		return i < max-1
+	})
+	out := strings.Join(seen, ", ")
+	if sel.Length() > len(seen) {
+		out += ", ..."
+	}
+	return out
 }
 
 // excerpt returns the evidence text for this container. Its length bound is applied by

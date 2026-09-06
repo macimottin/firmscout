@@ -137,6 +137,17 @@ func (q *Queue) Enqueue(ctx context.Context, j application.Job) error {
 //
 // An empty kinds slice leases jobs of any kind. The ordering is (priority, run_after),
 // matching jobs_dequeue_idx.
+//
+// The selection is a CTE joined into the UPDATE rather than the more obvious
+// `UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED)`. Both forms lease the
+// same rows -- that was measured, and the IN form was not observed losing any -- so the
+// reason is narrower than correctness. PostgreSQL plans the IN form as a Hash Semi
+// Join: the subquery locks its rows with SKIP LOCKED, but the enclosing UPDATE then
+// re-locks them through a scan of its own that carries no SKIP LOCKED, and can
+// therefore block behind another worker instead of stepping around it. A CTE holding
+// FOR UPDATE is materialised and evaluated once, and the UPDATE joins against ids this
+// transaction already holds, so there is no second lock acquisition to wait on.
+// Anyone collapsing this back into one statement re-introduces that wait.
 func (q *Queue) Dequeue(ctx context.Context, kinds []string, limit int, lease time.Duration, workerID string) ([]application.Job, error) {
 	limit = clampLimit(limit, 10, 1000)
 	if lease <= 0 {
@@ -146,15 +157,43 @@ func (q *Queue) Dequeue(ctx context.Context, kinds []string, limit int, lease ti
 		kinds = []string{}
 	}
 
+	// KNOWN OPEN DEFECT -- this query can hand the same job to two workers at once.
+	//
+	// Measured, not theorised. On a 28-core machine under 56 spinners, roughly one run in
+	// 600 of TestConcurrentDequeuesDoNotOverlap ends with every one of twenty jobs leased
+	// twice. The diagnostic captured at the moment of failure:
+	//
+	//     per-worker counts: [0 20 0 20]
+	//     row job_01M1SQ0AJ00MS96AMYJKY7NQ6Y status=running attempts=2 locked_by=worker
+	//
+	// Two workers each took the whole queue, sequentially -- attempts went 1 then 2 --
+	// so the second one leased twenty rows that were already running under a lease with
+	// fifty-nine seconds left on it. That is not at-least-once redelivery, which this
+	// design accepts and handlers are idempotent for. It is two workers running the same
+	// source check against a manufacturer simultaneously.
+	//
+	// Two hypotheses have been tested and REFUTED by measurement. Neither is the cause,
+	// and neither should be re-proposed without a new measurement:
+	//
+	//   1. "The outer UPDATE re-checks only `jobs.id = picked.job_id`, so under READ
+	//      COMMITTED a row updated and committed by another transaction still satisfies
+	//      it." The eligibility predicate below was repeated in the outer UPDATE to give
+	//      that re-check something to fail on. 2 double-lease failures in 1200 runs after.
+	//   2. "PostgreSQL is inlining the CTE, dissolving SKIP LOCKED." AS MATERIALIZED was
+	//      added. 0 failures in the first 1200 runs, then 3 in the next 1800 -- the clean
+	//      run was luck, and the change was reverted rather than left in place implying a
+	//      fix it does not deliver.
+	//
+	// The repeated predicate below is KEPT, because it is correct on its own terms and is
+	// the standard shape for this pattern -- not because it fixes the defect above.
+	//
+	// TestConcurrentDequeuesDoNotOverlap is a genuine detector of a genuine defect. It has
+	// already been mistaken for a flaky test once and weakened on that reading. Do not
+	// weaken it again, and do not skip it: the assertions it makes are the ones that
+	// matter, and they are failing because the queue is wrong, not because Linux is busy.
 	rows, err := q.db.q(ctx).Query(ctx,
-		`UPDATE jobs SET
-            status       = 'running',
-            locked_until = now() + make_interval(secs => $3::float8),
-            locked_by    = $4,
-            attempts     = attempts + 1,
-            updated_at   = now()
-          WHERE id IN (
-              SELECT id FROM jobs
+		`WITH picked AS (
+              SELECT id AS job_id FROM jobs
                WHERE (status = 'pending'
                       OR (status = 'running' AND locked_until IS NOT NULL AND locked_until <= now()))
                  AND run_after <= now()
@@ -163,6 +202,17 @@ func (q *Queue) Dequeue(ctx context.Context, kinds []string, limit int, lease ti
                LIMIT $2
                FOR UPDATE SKIP LOCKED
           )
+          UPDATE jobs SET
+            status       = 'running',
+            locked_until = now() + make_interval(secs => $3::float8),
+            locked_by    = $4,
+            attempts     = attempts + 1,
+            updated_at   = now()
+          FROM picked
+          WHERE jobs.id = picked.job_id
+            AND (jobs.status = 'pending'
+                 OR (jobs.status = 'running' AND jobs.locked_until IS NOT NULL
+                     AND jobs.locked_until <= now()))
           RETURNING`+jobReturning,
 		kinds, limit, lease.Seconds(), workerID)
 	if err != nil {

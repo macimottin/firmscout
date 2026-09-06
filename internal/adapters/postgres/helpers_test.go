@@ -3,8 +3,10 @@ package postgres
 import (
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -247,6 +249,57 @@ func TestClampLimit(t *testing.T) {
 	for _, c := range cases {
 		if got := clampLimit(c.in, c.def, c.max); got != c.want {
 			t.Errorf("clampLimit(%d, %d, %d) = %d, want %d", c.in, c.def, c.max, got, c.want)
+		}
+	}
+}
+
+// TestTruncateOnRuneBoundary is the unit half of the search-truncation repair: it pins
+// the helper without a database, so a break is a compile-fast failure rather than one
+// that needs PostgreSQL to notice. The integration half,
+// TestSearchAcceptsAnOverlongMultibyteQuery, proves the database agrees.
+func TestTruncateOnRuneBoundary(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		max  int
+		want string
+	}{
+		{"short input is untouched", "CRS328-24P-4S+RM", 200, "CRS328-24P-4S+RM"},
+		{"an exact fit is untouched", "abcd", 4, "abcd"},
+		{"ascii cuts where it is asked to", "abcdef", 4, "abcd"},
+		// The cut lands between the two bytes of the second e-acute, so the byte
+		// slice this replaced produced a lone continuation byte here.
+		{"a two-byte rune is not split", "\u00e9\u00e9\u00e9", 3, "\u00e9"},
+		{"a three-byte rune is not split", "\u5149\u5149", 4, "\u5149"},
+		{"a cut before the first rune yields the empty string", "\u5149", 2, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateOnRuneBoundary(tc.in, tc.max)
+			if got != tc.want {
+				t.Errorf("truncateOnRuneBoundary(%q, %d) = %q, want %q", tc.in, tc.max, got, tc.want)
+			}
+			if len(got) > tc.max {
+				t.Errorf("result is %d bytes, above the bound of %d", len(got), tc.max)
+			}
+			if !utf8.ValidString(got) {
+				t.Errorf("result %q is not valid UTF-8; PostgreSQL would refuse the statement", got)
+			}
+		})
+	}
+
+	// The shape the adapter actually meets: a model name pasted out of an asset
+	// register, longer than the bound, whose bytes do not align with it.
+	for _, in := range []string{
+		"x" + strings.Repeat("\u00e9", MaxSearchQueryLength+1),
+		strings.Repeat("\u5149", MaxSearchQueryLength+1),
+	} {
+		got := truncateOnRuneBoundary(in, MaxSearchQueryLength)
+		if len(got) > MaxSearchQueryLength {
+			t.Errorf("a %d-byte query truncated to %d bytes, above the bound", len(in), len(got))
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("a %d-byte query truncated to invalid UTF-8", len(in))
 		}
 	}
 }

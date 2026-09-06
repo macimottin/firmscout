@@ -132,8 +132,8 @@ const (
 // wrapper around it — must treat anything other than Allowed as a reason
 // to refuse Fetch, not merely a warning.
 type ComplianceStatus struct {
-	RobotsPolicy RobotsPolicyStatus // allowed | disallowed | not_checked
-	TermsReview  TermsReviewStatus  // pending | reviewed_ok | reviewed_blocked
+	RobotsPolicy RobotsPolicyStatus // allowed | disallowed | unknown | not_applicable
+	TermsReview  TermsReviewStatus  // pending | approved | restricted | prohibited
 }
 ```
 
@@ -415,7 +415,7 @@ testdata/fixtures/<vendor>/<source-id>/
 }
 ```
 
-`releaseDate.value` is formatted per its own `precision` (`YYYY-MM-DD`, `YYYY-MM`, or `YYYY`; omitted for `unknown`), matching the API rendering rule in [api.md](api.md#date-rendering-discipline) so a contributor internalises the same discipline in both places. `evidenceExcerptContains` and `confidenceAtLeast` are intentionally loose assertions rather than exact-match, because an excerpt's exact boundaries and a confidence score's exact float are the kind of thing that should be free to improve without rewriting every fixture; the fields that must match exactly — version, date, type, channel, applicability — are compared exactly.
+`releaseDate.value` is formatted per its own `precision` (`YYYY-MM-DD`, `YYYY-MM`, or `YYYY`; omitted for `unknown`), matching the API rendering rule in [api.md](api.md#4-date-rendering-discipline) so a contributor internalises the same discipline in both places. `evidenceExcerptContains` and `confidenceAtLeast` are intentionally loose assertions rather than exact-match, because an excerpt's exact boundaries and a confidence score's exact float are the kind of thing that should be free to improve without rewriting every fixture; the fields that must match exactly — version, date, type, channel, applicability — are compared exactly.
 
 **Adding a collector, in practice:** for the common config-driven case, a contributor adds a `collectors/config/<vendor>/<source>.yaml` file (collector-config-spec.md) and one fixture pair under `testdata/fixtures/<vendor>/<source>/`. No Go code is written or reviewed for the extraction logic itself — the engine (`html_selectors`, `text_regex`, …) is already tested against its own fixture corpus. Adding a hand-written collector additionally means implementing the four `Collector` methods and registering it with the `CollectorRegistry`, but the testing story is identical: `RunFixtures` against the same directory convention.
 
@@ -425,7 +425,7 @@ A fixture is a piece of a vendor's published page, checked into a public, permis
 
 - **Trim to the minimum.** Do not commit a full 400 KB page when the extraction logic only ever looks at one `<div class="changelog-header">`. Keep enough surrounding structure that the selector or regex is exercised realistically (including the elements around the target, so a selector that's accidentally too greedy would be caught), and delete the rest — navigation chrome, unrelated page sections, tracking scripts, anything not load-bearing for the test.
 - **Record provenance in `README.md`**, at minimum: the exact source URL fetched, the retrieval timestamp (UTC), and the SHA-256 content hash of the *original, untrimmed* response, so a maintainer can later verify the trimmed fixture is a faithful excerpt rather than silently drifted or fabricated. State plainly whether the fixture is a **recorded** excerpt of a real response or a **synthetic** one constructed to exercise an edge case (a missing field, a month-only date, a deliberately broken selector target) — never leave a reader to guess which.
-- **Never commit a full copyrighted document.** Release notes, changelogs, and PDFs are the vendor's copyrighted text. A trimmed fixture exercising the extraction path is fair use territory for a test artifact; a complete mirrored document is not, and it is also unnecessary — extraction logic needs structure, not content completeness. This is the same discipline as the evidence excerpt rule in [licensing.md](licensing.md#third-party-content): concise, for verification, never a full copy.
+- **Never commit a full copyrighted document.** Release notes, changelogs, and PDFs are the vendor's copyrighted text. A trimmed fixture exercising the extraction path is fair use territory for a test artifact; a complete mirrored document is not, and it is also unnecessary — extraction logic needs structure, not content completeness. This is the same discipline as the evidence excerpt rule in [licensing.md](licensing.md#6-third-party-content): concise, for verification, never a full copy.
 - **Never make a test depend on a live site.** This is repeated because it is the rule most tempting to break under time pressure — "just fetch the real page in the test, it's easier" — and it is the rule §7.8 of the blueprint calls absolute. A collector test suite that can fail because a vendor redesigned their site teaches contributors to ignore CI failures, which is a worse outcome than the fixture going briefly stale.
 
 ## 10. Choosing configuration-driven versus code

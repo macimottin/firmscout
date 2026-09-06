@@ -15,22 +15,31 @@ const ProblemBase = "https://firmscout.dev/problems/"
 // The problem catalogue. A consumer branches on these values, so they are part of the
 // public contract and may never be respelled without a version bump.
 //
-// # Known divergence from docs/architecture/api.md §6
+// # Reconciled in Phase 2
 //
-// That document catalogues five of these under different slugs -- invalid-parameter,
-// validation-failed, unauthorized, invalid-api-key and internal-error -- and adds no
-// invalid-request, unauthenticated or internal. The two spellings must be reconciled
-// before the API is published, and this is deliberately not resolved silently in code:
-// a problem type is an identifier a consumer hardcodes, so which set wins is a contract
-// decision, not an implementation detail. The names here are the ones the
-// implementation brief specified; the document's finer split (a separate type for a
-// malformed body, and for a revoked-versus-absent key) is the more informative of the
-// two and is the likelier resolution.
+// This package and docs/architecture/api.md §6 used to catalogue different slugs for
+// the same five situations. The document won, because its own preamble already declared
+// itself the tie-break, and because its split is the more informative one:
+// invalid-parameter versus validation-failed tells a consumer whether to fix a query
+// string or a body, and unauthorized versus invalid-api-key tells them whether to send
+// a credential or replace one. Both are branches a client library genuinely writes.
+//
+// Three URIs changed value -- invalid-request became invalid-parameter, unauthenticated
+// became unauthorized, internal became internal-error -- and the Go identifiers changed
+// with two of them, so a stale reference is a compile error rather than a runtime
+// surprise. The API is pre-alpha, unpublished and has no keyed consumers; this was the
+// last cheap moment. See ADR-0022.
 const (
 	// TypeNotFound: a slug or id does not resolve to an existing record.
 	TypeNotFound = ProblemBase + "not-found"
-	// TypeInvalidRequest: a query or path parameter failed validation.
-	TypeInvalidRequest = ProblemBase + "invalid-request"
+	// TypeInvalidParameter: a query or path parameter failed validation, or a
+	// required non-credential header is absent.
+	TypeInvalidParameter = ProblemBase + "invalid-parameter"
+	// TypeValidationFailed: a request body is malformed or fails its rules. It is a
+	// separate type from TypeInvalidParameter, and both are 400, because the two send
+	// a consumer to different places: one to the query string they built, the other
+	// to the JSON they serialised.
+	TypeValidationFailed = ProblemBase + "validation-failed"
 	// TypeRateLimited: the short-window token bucket for this caller is exhausted.
 	TypeRateLimited = ProblemBase + "rate-limited"
 	// TypeQuotaExceeded: the durable monthly quota for this key is exhausted. It is
@@ -38,13 +47,24 @@ const (
 	// need entirely different responses from the consumer: back off for seconds, or
 	// buy more quota.
 	TypeQuotaExceeded = ProblemBase + "quota-exceeded"
-	// TypeUnauthenticated: an endpoint requiring a key received none, or one that
-	// does not resolve to a live key.
-	TypeUnauthenticated = ProblemBase + "unauthenticated"
+	// TypeUnauthorized: an endpoint requiring a key received none, or an unparseable
+	// Authorization header, or the deployment cannot check keys at all.
+	TypeUnauthorized = ProblemBase + "unauthorized"
+	// TypeInvalidAPIKey: a well-formed credential was presented and does not resolve
+	// to a live, non-revoked key. Split out of the old blanket 401 because "send a
+	// credential" and "replace the one you sent" are different instructions, and a
+	// consumer that cannot tell them apart retries the same dead key forever.
+	TypeInvalidAPIKey = ProblemBase + "invalid-api-key"
 	// TypeForbidden: an authenticated caller's plan does not reach this endpoint.
 	TypeForbidden = ProblemBase + "forbidden"
+	// TypeConflict: the state of the resource forbids the operation -- a review item
+	// somebody has already decided. Without it the review endpoints would have to
+	// report an already-decided item as a malformed request, which is a lie that
+	// sends the caller to fix their own payload.
+	TypeConflict = ProblemBase + "conflict"
 	// TypeInternal: an unhandled server-side failure. Its detail is always generic.
-	TypeInternal = ProblemBase + "internal"
+	// The identifier keeps its name and changes its value; see the note above.
+	TypeInternal = ProblemBase + "internal-error"
 	// TypeServiceUnavailable: a readiness gate is failing, e.g. the database is
 	// unreachable. Distinct from TypeInternal because it is expected to be transient
 	// and is safe for a client to retry.
@@ -56,11 +76,14 @@ const (
 // composed at the call site.
 const (
 	titleNotFound           = "Resource not found"
-	titleInvalidRequest     = "Invalid request"
+	titleInvalidParameter   = "Invalid parameter"
+	titleValidationFailed   = "Request body validation failed"
 	titleRateLimited        = "Too many requests"
 	titleQuotaExceeded      = "Monthly quota exceeded"
-	titleUnauthenticated    = "Authentication required"
+	titleUnauthorized       = "Authentication required"
+	titleInvalidAPIKey      = "API key invalid or revoked"
 	titleForbidden          = "Not available on this plan"
+	titleConflict           = "Conflicting state"
 	titleInternal           = "Internal server error"
 	titleServiceUnavailable = "Service temporarily unavailable"
 )
@@ -113,9 +136,16 @@ func NotFound(r *http.Request, detail string) Problem {
 	return newProblem(r, TypeNotFound, titleNotFound, http.StatusNotFound, detail)
 }
 
-// InvalidRequest builds a 400 problem for r.
-func InvalidRequest(r *http.Request, detail string) Problem {
-	return newProblem(r, TypeInvalidRequest, titleInvalidRequest, http.StatusBadRequest, detail)
+// InvalidParameter builds a 400 problem for a query or path parameter, or for a
+// required header that is not a credential.
+func InvalidParameter(r *http.Request, detail string) Problem {
+	return newProblem(r, TypeInvalidParameter, titleInvalidParameter, http.StatusBadRequest, detail)
+}
+
+// ValidationFailed builds a 400 problem for a request body that is malformed or breaks
+// its own rules.
+func ValidationFailed(r *http.Request, detail string) Problem {
+	return newProblem(r, TypeValidationFailed, titleValidationFailed, http.StatusBadRequest, detail)
 }
 
 // RateLimited builds a 429 problem for the short-window bucket.
@@ -128,14 +158,26 @@ func QuotaExceeded(r *http.Request, detail string) Problem {
 	return newProblem(r, TypeQuotaExceeded, titleQuotaExceeded, http.StatusTooManyRequests, detail)
 }
 
-// Unauthenticated builds a 401 problem.
-func Unauthenticated(r *http.Request, detail string) Problem {
-	return newProblem(r, TypeUnauthenticated, titleUnauthenticated, http.StatusUnauthorized, detail)
+// Unauthorized builds a 401 problem for a caller who presented no usable credential,
+// or for a deployment that cannot check one.
+func Unauthorized(r *http.Request, detail string) Problem {
+	return newProblem(r, TypeUnauthorized, titleUnauthorized, http.StatusUnauthorized, detail)
+}
+
+// InvalidAPIKey builds a 401 problem for a credential that was presented and does not
+// resolve.
+func InvalidAPIKey(r *http.Request, detail string) Problem {
+	return newProblem(r, TypeInvalidAPIKey, titleInvalidAPIKey, http.StatusUnauthorized, detail)
 }
 
 // Forbidden builds a 403 problem.
 func Forbidden(r *http.Request, detail string) Problem {
 	return newProblem(r, TypeForbidden, titleForbidden, http.StatusForbidden, detail)
+}
+
+// Conflict builds a 409 problem for an operation the resource's current state forbids.
+func Conflict(r *http.Request, detail string) Problem {
+	return newProblem(r, TypeConflict, titleConflict, http.StatusConflict, detail)
 }
 
 // Internal builds a 500 problem whose detail is deliberately generic and whose cause

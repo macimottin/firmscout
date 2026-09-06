@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/macimottin/firmscout/internal/application"
+	"github.com/macimottin/firmscout/internal/domain"
 )
 
 func hashKey(plaintext string) string {
@@ -193,8 +194,10 @@ func TestAPIKeyResolution(t *testing.T) {
 		}
 		var p Problem
 		_ = json.Unmarshal(w.Body.Bytes(), &p)
-		if p.Type != TypeUnauthenticated {
-			t.Errorf("type = %q, want %q", p.Type, TypeUnauthenticated)
+		// invalid-api-key, not unauthorized: the caller sent a credential and it did
+		// not resolve, which is "replace this key", not "send a key".
+		if p.Type != TypeInvalidAPIKey {
+			t.Errorf("type = %q, want %q", p.Type, TypeInvalidAPIKey)
 		}
 	})
 
@@ -727,5 +730,377 @@ func TestRateLimitAndQuotaEventsAreCounted(t *testing.T) {
 	})
 	if n := len(rec.find(application.MetricAPIQuotaViolations)); n != 1 {
 		t.Errorf("%s recorded %d times, want 1", application.MetricAPIQuotaViolations, n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// the problem catalogue
+// ---------------------------------------------------------------------------
+
+// The revert detector for ADR-0022.
+//
+// The URIs are written out as literals rather than composed from ProblemBase, because a
+// test that built them the same way the code does would agree with the code no matter
+// what the code said. These strings are the contract as docs/architecture/api.md §6
+// publishes it, and if one of them has to change here, that is the version bump.
+func TestProblemTypesAreCanonical(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		constant string
+		title    string
+		status   int
+		build    func(*http.Request, string) Problem
+	}{
+		{"https://firmscout.dev/problems/not-found", "Resource not found", http.StatusNotFound, NotFound},
+		{"https://firmscout.dev/problems/invalid-parameter", "Invalid parameter", http.StatusBadRequest, InvalidParameter},
+		{"https://firmscout.dev/problems/validation-failed", "Request body validation failed", http.StatusBadRequest, ValidationFailed},
+		{"https://firmscout.dev/problems/unauthorized", "Authentication required", http.StatusUnauthorized, Unauthorized},
+		{"https://firmscout.dev/problems/invalid-api-key", "API key invalid or revoked", http.StatusUnauthorized, InvalidAPIKey},
+		{"https://firmscout.dev/problems/forbidden", "Not available on this plan", http.StatusForbidden, Forbidden},
+		{"https://firmscout.dev/problems/conflict", "Conflicting state", http.StatusConflict, Conflict},
+		{"https://firmscout.dev/problems/rate-limited", "Too many requests", http.StatusTooManyRequests, RateLimited},
+		{"https://firmscout.dev/problems/quota-exceeded", "Monthly quota exceeded", http.StatusTooManyRequests, QuotaExceeded},
+		{"https://firmscout.dev/problems/service-unavailable", "Service temporarily unavailable", http.StatusServiceUnavailable, nil},
+		{"https://firmscout.dev/problems/internal-error", "Internal server error", http.StatusInternalServerError, nil},
+	}
+
+	// Every Type* constant, so a new one added without a row here is caught.
+	declared := map[string]bool{
+		TypeNotFound: true, TypeInvalidParameter: true, TypeValidationFailed: true,
+		TypeUnauthorized: true, TypeInvalidAPIKey: true, TypeForbidden: true,
+		TypeConflict: true, TypeRateLimited: true, TypeQuotaExceeded: true,
+		TypeInternal: true, TypeServiceUnavailable: true,
+	}
+	if len(declared) != len(cases) {
+		t.Fatalf("the catalogue declares %d types and this table has %d rows", len(declared), len(cases))
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/vendors", nil)
+	for _, tc := range cases {
+		if !declared[tc.constant] {
+			t.Errorf("%s is documented in api.md §6 but no Type* constant holds it", tc.constant)
+			continue
+		}
+		if tc.build == nil {
+			// Internal and ServiceUnavailable take a cause, so they are checked below.
+			continue
+		}
+		p := tc.build(r, "detail")
+		if p.Type != tc.constant {
+			t.Errorf("constructor produced type %q, want %q", p.Type, tc.constant)
+		}
+		if p.Title != tc.title {
+			t.Errorf("%s: title = %q, want %q", tc.constant, p.Title, tc.title)
+		}
+		if p.Status != tc.status {
+			t.Errorf("%s: status = %d, want %d", tc.constant, p.Status, tc.status)
+		}
+	}
+
+	if p := Internal(r, errors.New("boom")); p.Type != "https://firmscout.dev/problems/internal-error" ||
+		p.Status != http.StatusInternalServerError {
+		t.Errorf("Internal = %q/%d", p.Type, p.Status)
+	}
+	if p := ServiceUnavailable(r, "detail", errors.New("boom")); p.Type != "https://firmscout.dev/problems/service-unavailable" ||
+		p.Status != http.StatusServiceUnavailable {
+		t.Errorf("ServiceUnavailable = %q/%d", p.Type, p.Status)
+	}
+
+	// The three renamed URIs must not survive anywhere in the catalogue. A constant
+	// still holding one would mean the rename was reverted for that type only, which
+	// is the shape a partial revert actually takes.
+	for _, stale := range []string{
+		"https://firmscout.dev/problems/invalid-request",
+		"https://firmscout.dev/problems/unauthenticated",
+		"https://firmscout.dev/problems/internal",
+	} {
+		if declared[stale] {
+			t.Errorf("the pre-Phase-2 URI %q is still declared; see ADR-0022", stale)
+		}
+	}
+}
+
+// Both 401s are 401, and they are not the same problem. "Send a credential" and
+// "replace the one you sent" are different instructions, and a consumer that cannot
+// tell them apart retries a dead key forever.
+func TestInvalidAPIKeyIsDistinctFromUnauthorized(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	seedProduct(h)
+	h.apiKeys.add(hashKey("live-key"), "key_1",
+		application.APIConsumer{ID: "con_1", Plan: "professional", Status: "active"})
+
+	cases := []struct {
+		name    string
+		header  string
+		value   string
+		want    string
+		harness func(*testing.T) *harness
+	}{
+		{
+			name: "a presented key that does not resolve", header: HeaderAuthorization,
+			value: "Bearer revoked-key", want: TypeInvalidAPIKey,
+		},
+		{
+			name: "an X-API-Key that does not resolve", header: HeaderAPIKey,
+			value: "revoked-key", want: TypeInvalidAPIKey,
+		},
+		{
+			name: "an Authorization header that is not a bearer token", header: HeaderAuthorization,
+			value: "Basic dXNlcjpwYXNz", want: TypeUnauthorized,
+		},
+		{
+			name: "a bearer scheme with no token", header: HeaderAuthorization,
+			value: "Bearer   ", want: TypeUnauthorized,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := h.do(http.MethodGet, "/api/v1/products/mikrotik-routeros", func(r *http.Request) {
+				r.Header.Set(tc.header, tc.value)
+			})
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401; body %s", w.Code, w.Body.String())
+			}
+			if ct := w.Header().Get("Content-Type"); ct != ProblemContentType {
+				t.Errorf("Content-Type = %q, want %q", ct, ProblemContentType)
+			}
+			var p Problem
+			if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if p.Type != tc.want {
+				t.Errorf("type = %q, want %q", p.Type, tc.want)
+			}
+		})
+	}
+
+	// A deployment with no key store cannot check a credential at all. That is
+	// unauthorized, not invalid-api-key: the key may be perfectly good, and telling the
+	// caller to replace it would send them to fix something that is not broken.
+	bare := newHarness(t, func(d *Deps, _ *harness) { d.APIKeys = nil })
+	seedProduct(bare)
+	w := bare.do(http.MethodGet, "/api/v1/products/mikrotik-routeros", func(r *http.Request) {
+		r.Header.Set(HeaderAuthorization, "Bearer anything")
+	})
+	var p Problem
+	_ = json.Unmarshal(w.Body.Bytes(), &p)
+	if w.Code != http.StatusUnauthorized || p.Type != TypeUnauthorized {
+		t.Errorf("no key store: status = %d type = %q, want 401 %q", w.Code, p.Type, TypeUnauthorized)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Vary
+// ---------------------------------------------------------------------------
+
+// The revert detector for the shared-cache rule.
+//
+// A cacheable response whose body depends on the caller's plan and carries no Vary is a
+// response a shared cache may hand to a caller of a different tier. The 304 is asserted
+// as well as the 200: a cache that stored the 200 without the header and then
+// revalidated would still be free to reuse the entry for anyone.
+func TestCacheableResponsesVaryOnCredentials(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	seedProduct(h)
+	h.vendors.put(domain.Vendor{ID: "ven_mikrotik", Slug: "mikrotik", Name: "MikroTik"})
+	h.releases.setLatest("prd_routeros", "", domain.Release{
+		ID: "rel_01J8Z3K9QWERTYUIOPASDFGH", Version: mustVersion(t, "7.24.2"),
+		ReleaseType: domain.ReleaseTypeEmbeddedOS, Channel: "stable",
+	})
+	h.releases.put("prd_routeros", domain.Release{
+		ID: "rel_01J8Z3K9QWERTYUIOPASDFGH", Version: mustVersion(t, "7.24.2"),
+		ReleaseType: domain.ReleaseTypeEmbeddedOS, Channel: "stable",
+		FirstObservedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+	})
+
+	// Every cacheable route, which is every route that declares a Cache-Control policy.
+	cacheable := map[string]string{
+		"/api/v1/search?q=routeros":                     cacheSearch,
+		"/api/v1/vendors":                               cacheCatalogue,
+		"/api/v1/vendors/mikrotik":                      cacheCatalogue,
+		"/api/v1/products/mikrotik-routeros":            cacheCatalogue,
+		"/api/v1/products/mikrotik-routeros/releases":   cacheReleases,
+		"/api/v1/products/mikrotik-routeros/latest":     cacheReleases,
+		"/api/v1/releases/rel_01J8Z3K9QWERTYUIOPASDFGH": cacheImmutable,
+	}
+	for target, wantCache := range cacheable {
+		first := h.do(http.MethodGet, target)
+		if first.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200; body %s", target, first.Code, first.Body.String())
+		}
+		if cc := first.Header().Get(HeaderCacheControl); cc != wantCache {
+			t.Errorf("%s: Cache-Control = %q, want %q", target, cc, wantCache)
+		}
+		if got := first.Header().Get(HeaderVary); got != varyCredentials {
+			t.Errorf("%s: 200 Vary = %q, want %q -- a shared cache could serve one tier's body to another",
+				target, got, varyCredentials)
+		}
+		// Both carriers, not just one: a Vary naming only Authorization leaves every
+		// X-API-Key response interchangeable.
+		for _, carrier := range []string{HeaderAuthorization, HeaderAPIKey} {
+			if !strings.Contains(first.Header().Get(HeaderVary), carrier) {
+				t.Errorf("%s: Vary does not name %s", target, carrier)
+			}
+		}
+
+		etag := first.Header().Get(HeaderETag)
+		if etag == "" {
+			continue
+		}
+		second := h.do(http.MethodGet, target, func(r *http.Request) {
+			r.Header.Set(HeaderIfNoneMatch, etag)
+		})
+		if second.Code != http.StatusNotModified {
+			t.Fatalf("%s: conditional status = %d, want 304", target, second.Code)
+		}
+		if got := second.Header().Get(HeaderVary); got != varyCredentials {
+			t.Errorf("%s: 304 Vary = %q, want %q", target, got, varyCredentials)
+		}
+	}
+}
+
+// Vary would needlessly fragment a cache it cannot protect, so it goes nowhere a
+// response is not cacheable in the first place: not on a problem document, and not on
+// the infrastructure endpoints, which are no-store and identical for everyone.
+func TestVaryIsAbsentWhereNothingIsCached(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+
+	for _, target := range []string{"/healthz", "/readyz", "/metrics"} {
+		w := h.do(http.MethodGet, target)
+		if got := w.Header().Get(HeaderVary); got != "" {
+			t.Errorf("%s: Vary = %q on an uncacheable infrastructure endpoint", target, got)
+		}
+	}
+
+	// A problem document already carries no-store; a validator or a Vary on one would
+	// be describing a cache entry that must never exist.
+	w := h.do(http.MethodGet, "/api/v1/products/does-not-exist")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	if got := w.Header().Get(HeaderVary); got != "" {
+		t.Errorf("Vary = %q on a problem document", got)
+	}
+	if w.Header().Get(HeaderETag) != "" {
+		t.Error("a problem document must not carry a validator")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// cache partitioning by credential
+// ---------------------------------------------------------------------------
+
+// The revert detector for T-13, and it starts by proving the premise rather than
+// assuming it: one URL, two callers, two different bodies.
+//
+// Before this fix both of those responses carried "public, max-age=300" and relied on
+// Vary to keep them apart. CloudFront -- which this architecture names -- honours Vary
+// only for Accept-Encoding, so a URL-keyed shared cache would have served the paid
+// archive to an anonymous caller or the empty anonymous page to a paying customer, and
+// the entry would also have carried one consumer's X-RateLimit-Remaining and
+// X-Quota-Remaining. security.md §4.10 says the mitigation in as many words: no response
+// to an authenticated request is cached at the CDN at all.
+func TestAuthenticatedResponsesAreNotStorable(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	seedProduct(h)
+	seedTwoYearsOfReleases(t, h)
+	h.apiKeys.add(hashKey("paid"), "key_paid",
+		application.APIConsumer{ID: "con_paid", Plan: application.PlanProfessional, Status: "active"})
+
+	const target = "/api/v1/products/mikrotik-routeros/releases"
+	anon := h.do(http.MethodGet, target)
+	paid := h.do(http.MethodGet, target, func(r *http.Request) {
+		r.Header.Set(HeaderAuthorization, "Bearer paid")
+	})
+	if anon.Code != http.StatusOK || paid.Code != http.StatusOK {
+		t.Fatalf("status: anonymous = %d, keyed = %d", anon.Code, paid.Code)
+	}
+	if anon.Body.String() == paid.Body.String() {
+		t.Fatal("the two callers received the same body, so this test is not exercising a tier-dependent response")
+	}
+
+	// The anonymous response is still public: the CDN has to earn its keep, and the
+	// traffic that decides hit rate is the public website, which sends no credential.
+	if cc := anon.Header().Get(HeaderCacheControl); cc != cacheReleases {
+		t.Errorf("anonymous Cache-Control = %q, want %q", cc, cacheReleases)
+	}
+	// The keyed one is storable by nothing.
+	cc := paid.Header().Get(HeaderCacheControl)
+	if cc != cacheAuthenticated {
+		t.Errorf("authenticated Cache-Control = %q, want %q", cc, cacheAuthenticated)
+	}
+	if !strings.Contains(cc, "no-store") || strings.Contains(cc, "public") {
+		t.Errorf("authenticated Cache-Control = %q; a shared cache may store it", cc)
+	}
+}
+
+// The rule is the caller's, not the route's, on every cacheable endpoint including the
+// immutable one. A per-endpoint exception has to be got right again on every endpoint
+// added later, and it fails silently when it is wrong -- and even an immutable body
+// ships with that caller's own rate-limit and quota counters.
+func TestNoCacheableRouteIsPublicForAKeyedCaller(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	seedProduct(h)
+	h.vendors.put(domain.Vendor{ID: "ven_mikrotik", Slug: "mikrotik", Name: "MikroTik"})
+	h.releases.setLatest("prd_routeros", "", domain.Release{
+		ID: "rel_01J8Z3K9QWERTYUIOPASDFGH", Version: mustVersion(t, "7.24.2"),
+		ReleaseType: domain.ReleaseTypeEmbeddedOS, Channel: "stable",
+	})
+	h.releases.put("prd_routeros", domain.Release{
+		ID: "rel_01J8Z3K9QWERTYUIOPASDFGH", Version: mustVersion(t, "7.24.2"),
+		ReleaseType: domain.ReleaseTypeEmbeddedOS, Channel: "stable",
+		FirstObservedAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+	})
+	h.apiKeys.add(hashKey("k"), "key_1", consumerFixture())
+
+	for _, target := range []string{
+		"/api/v1/search?q=routeros",
+		"/api/v1/vendors",
+		"/api/v1/vendors/mikrotik",
+		"/api/v1/products/mikrotik-routeros",
+		"/api/v1/products/mikrotik-routeros/releases",
+		"/api/v1/products/mikrotik-routeros/latest",
+		"/api/v1/releases/rel_01J8Z3K9QWERTYUIOPASDFGH",
+	} {
+		w := h.do(http.MethodGet, target, func(r *http.Request) {
+			r.Header.Set(HeaderAuthorization, "Bearer k")
+		})
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d; body %s", target, w.Code, w.Body.String())
+		}
+		if cc := w.Header().Get(HeaderCacheControl); cc != cacheAuthenticated {
+			t.Errorf("%s: Cache-Control = %q for a keyed caller, want %q", target, cc, cacheAuthenticated)
+		}
+		// Vary stays as the second line of defence, for a layer that ignores no-store.
+		if got := w.Header().Get(HeaderVary); got != varyCredentials {
+			t.Errorf("%s: Vary = %q, want %q", target, got, varyCredentials)
+		}
+		// The validator is still issued: the caller may hold their own copy and ask
+		// whether it is current. What must not happen is a *shared* copy.
+		if w.Header().Get(HeaderETag) == "" {
+			t.Errorf("%s: a keyed caller lost its validator", target)
+		}
+	}
+
+	// The same key on the same URL still gets a 304 from its own validator, and that
+	// 304 repeats the policy rather than reverting to the route's.
+	first := h.do(http.MethodGet, "/api/v1/products/mikrotik-routeros", func(r *http.Request) {
+		r.Header.Set(HeaderAuthorization, "Bearer k")
+	})
+	second := h.do(http.MethodGet, "/api/v1/products/mikrotik-routeros", func(r *http.Request) {
+		r.Header.Set(HeaderAuthorization, "Bearer k")
+		r.Header.Set(HeaderIfNoneMatch, first.Header().Get(HeaderETag))
+	})
+	if second.Code != http.StatusNotModified {
+		t.Fatalf("conditional status = %d, want 304", second.Code)
+	}
+	if cc := second.Header().Get(HeaderCacheControl); cc != cacheAuthenticated {
+		t.Errorf("304 Cache-Control = %q, want %q", cc, cacheAuthenticated)
 	}
 }

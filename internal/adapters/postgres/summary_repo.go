@@ -2,10 +2,13 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/macimottin/firmscout/internal/application"
+	"github.com/macimottin/firmscout/internal/domain"
 )
 
 // SummaryRepo is the PostgreSQL implementation of application.SummaryRepository. It
@@ -28,30 +31,64 @@ const MaxSearchResults = 50
 
 const summaryColumns = `
     product_id, vendor_slug, vendor_name, product_slug, product_name, family_name,
-    aliases, category_slugs, latest_release_id, latest_raw_version, latest_release_type,
-    latest_channel, latest_release_date, latest_release_date_precision,
-    recommended_release_id, release_count, lifecycle_status, has_source_conflict,
-    advisory_count, last_verified_at, refreshed_at`
+    model_identifier, runs, aliases, category_slugs, latest_release_id,
+    latest_raw_version, latest_release_type, latest_channel, latest_release_date,
+    latest_release_date_precision, recommended_release_id, release_count,
+    lifecycle_status, has_source_conflict, official_sources, conflict_channel,
+    conflict_versions, conflict_source_count, conflict_detected_at, advisory_count,
+    last_verified_at, refreshed_at`
+
+// officialSourceRow is the shape RefreshProductSummary writes into official_sources.
+// Kind stays the raw sources.source_type string here, exactly as stored; scanSummary
+// maps it through domain.PublicSourceKind rather than trusting the JSON to already
+// carry the public vocabulary, so this decodes what RefreshProductSummary actually
+// wrote instead of what an out-of-band editor of the column might have put there.
+type officialSourceRow struct {
+	Slug     string `json:"slug"`
+	URL      string `json:"url"`
+	Kind     string `json:"kind"`
+	Official bool   `json:"official"`
+}
+
+// productRunsRow is the shape RefreshProductSummary writes into runs, mirroring
+// officialSourceRow. Kind stays a raw string here and is carried into
+// domain.RelationKind without being validated away: an unrecognised kind read back is
+// data written by a version of the schema this binary does not know about, and
+// dropping it would make a product page quietly claim the device runs nothing.
+type productRunsRow struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
 
 func scanSummary(row interface{ Scan(...any) error }) (application.ProductSummary, error) {
 	var (
-		s           application.ProductSummary
-		familyName  *string
-		latestID    *string
-		latestRaw   *string
-		latestType  *string
-		latestChan  *string
-		latestDate  *time.Time
-		latestPrec  *string
-		recommended *string
-		verifiedAt  *time.Time
+		s               application.ProductSummary
+		familyName      *string
+		modelID         *string
+		runs            []byte
+		latestID        *string
+		latestRaw       *string
+		latestType      *string
+		latestChan      *string
+		latestDate      *time.Time
+		latestPrec      *string
+		recommended     *string
+		officialSources []byte
+		conflictChannel *string
+		conflictVers    []string
+		conflictCount   *int
+		conflictAt      *time.Time
+		verifiedAt      *time.Time
 	)
 	if err := row.Scan(
 		&s.ProductID, &s.VendorSlug, &s.VendorName, &s.ProductSlug, &s.ProductName,
-		&familyName, &s.Aliases, &s.CategorySlugs, &latestID, &latestRaw, &latestType,
+		&familyName, &modelID, &runs,
+		&s.Aliases, &s.CategorySlugs, &latestID, &latestRaw, &latestType,
 		&latestChan, &latestDate, &latestPrec, &recommended, &s.ReleaseCount,
-		&s.LifecycleStatus, &s.HasSourceConflict, &s.AdvisoryCount, &verifiedAt,
-		&s.RefreshedAt,
+		&s.LifecycleStatus, &s.HasSourceConflict,
+		&officialSources, &conflictChannel, &conflictVers, &conflictCount, &conflictAt,
+		&s.AdvisoryCount, &verifiedAt, &s.RefreshedAt,
 	); err != nil {
 		return application.ProductSummary{}, err
 	}
@@ -62,6 +99,7 @@ func scanSummary(row interface{ Scan(...any) error }) (application.ProductSummar
 	}
 
 	s.FamilyName = str(familyName)
+	s.ModelIdentifier = str(modelID)
 	s.LatestReleaseID = str(latestID)
 	s.LatestRawVersion = str(latestRaw)
 	s.LatestReleaseType = str(latestType)
@@ -69,6 +107,58 @@ func scanSummary(row interface{ Scan(...any) error }) (application.ProductSummar
 	s.LatestReleaseDate = date
 	s.RecommendedReleaseID = str(recommended)
 	s.LastVerifiedAt = tim(verifiedAt)
+
+	// A malformed official_sources column should never happen: RefreshProductSummary
+	// is the only writer, and it always emits a JSON array of the shape above. If it
+	// ever does happen, failing the read loudly beats rendering a silently truncated
+	// or empty source list as if it were the honest answer.
+	var rawSources []officialSourceRow
+	if len(officialSources) > 0 {
+		if err := json.Unmarshal(officialSources, &rawSources); err != nil {
+			return application.ProductSummary{}, fmt.Errorf("summary.scan: malformed official_sources for product %s: %w", s.ProductID, err)
+		}
+	}
+	if len(rawSources) > 0 {
+		s.OfficialSources = make([]application.ProductSourceRef, len(rawSources))
+		for i, src := range rawSources {
+			s.OfficialSources[i] = application.ProductSourceRef{
+				Slug:     src.Slug,
+				URL:      src.URL,
+				Kind:     domain.PublicSourceKind(domain.SourceType(src.Kind)),
+				Official: src.Official,
+			}
+		}
+	}
+
+	// Same treatment as official_sources above, for the same reason: this column has
+	// exactly one writer, so malformed JSON here means something else has been editing
+	// the projection, and failing the read beats rendering a device page that silently
+	// names no operating system.
+	var rawRuns []productRunsRow
+	if len(runs) > 0 {
+		if err := json.Unmarshal(runs, &rawRuns); err != nil {
+			return application.ProductSummary{}, fmt.Errorf("summary.scan: malformed runs for product %s: %w", s.ProductID, err)
+		}
+	}
+	if len(rawRuns) > 0 {
+		s.Runs = make([]application.ProductRunsRef, len(rawRuns))
+		for i, ref := range rawRuns {
+			s.Runs[i] = application.ProductRunsRef{
+				Slug: ref.Slug,
+				Name: ref.Name,
+				Kind: domain.RelationKind(ref.Kind),
+			}
+		}
+	}
+
+	if conflictChannel != nil {
+		s.Conflict = &application.ProductConflictSummary{
+			Channel:     *conflictChannel,
+			Versions:    conflictVers,
+			SourceCount: integer(conflictCount),
+			DetectedAt:  tim(conflictAt),
+		}
+	}
 	return s, nil
 }
 
@@ -104,13 +194,16 @@ func (r *SummaryRepo) Get(ctx context.Context, productSlug string) (application.
 // The tsquery uses the 'simple' configuration to match the generated column: stemming
 // would map "routing" and "router" together, which is wrong for product names.
 //
-// The query is truncated to MaxSearchQueryLength and the limit capped at
-// MaxSearchResults; an empty query returns no rows rather than the whole catalogue.
+// The query is truncated to MaxSearchQueryLength bytes on a rune boundary and the limit
+// capped at MaxSearchResults; an empty query returns no rows rather than the whole
+// catalogue. The truncation went through a raw byte slice until a fix pass: a 201-rune
+// query of accented or CJK characters -- a model name pasted out of an asset register --
+// was cut through the middle of a rune, and the invalid UTF-8 that resulted made
+// PostgreSQL reject the statement, so an over-long search returned 500 instead of
+// results. See truncateOnRuneBoundary for why the adapter carries its own copy of a
+// helper internal/application already has.
 func (r *SummaryRepo) Search(ctx context.Context, query string, limit int) ([]application.ProductSummary, error) {
-	q := strings.TrimSpace(query)
-	if len(q) > MaxSearchQueryLength {
-		q = q[:MaxSearchQueryLength]
-	}
+	q := truncateOnRuneBoundary(strings.TrimSpace(query), MaxSearchQueryLength)
 	if q == "" {
 		return nil, nil
 	}

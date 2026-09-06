@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Unavailable } from "@/components/unavailable";
 import { isUnreachable, listVendors } from "@/lib/api";
+import { vendorProductCountLabel } from "@/lib/vendor-products";
 
 export const metadata: Metadata = {
   title: "Vendors",
@@ -43,9 +44,16 @@ export default async function VendorsPage() {
                 <Card className="h-full transition-colors hover:border-ink-400">
                   <CardHeader>
                     <CardTitle>{vendor.name}</CardTitle>
-                    <CardDescription>
-                      {vendor.productCount} product{vendor.productCount === 1 ? "" : "s"}
-                    </CardDescription>
+                    {/* `vendor.productCount` is never sent by the vendor read model
+                        today, and this rendered a bare " products" on every card as a
+                        result -- the same never-sent field, and the same class of
+                        defect, as the detail page's "Products tracked" row. The line is
+                        omitted rather than guessed at. See lib/vendor-products.ts. */}
+                    {vendorProductCountLabel(vendor.productCount) === null ? null : (
+                      <CardDescription>
+                        {vendorProductCountLabel(vendor.productCount)}
+                      </CardDescription>
+                    )}
                   </CardHeader>
                   <CardContent className="text-sm text-ink-500">{vendor.website}</CardContent>
                 </Card>

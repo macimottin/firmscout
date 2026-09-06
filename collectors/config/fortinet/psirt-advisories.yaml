@@ -1,0 +1,97 @@
+# =============================================================================
+# Collector: Fortinet PSIRT advisory feed
+# =============================================================================
+# Source registration: dataset/sources/fortinet/psirt-advisories.yaml, which
+# ships enabled: false pending the ADR-0018 terms review. This config describes
+# how the feed would be read; it does not authorise reading it.
+#
+# WHAT THIS FEED DOES AND DOES NOT SAY (measured 2026-09-05)
+#
+# Each <item> carries a title, a link to the advisory page, a guid equal to the
+# link, a CDATA description and an RFC 1123 pubDate. The link contains the
+# vendor's own advisory identifier (FG-IR-26-163). The feed does NOT state which
+# products an advisory affects -- that is on the advisory page, not in the feed.
+#
+# Two consequences are deliberate:
+#
+#   1. `version` is the advisory identifier. It is the only stable, vendor-issued
+#      identifier every item carries, and it is what a human needs in order to
+#      look the advisory up. It is not a software version and nothing in
+#      FirmScout orders it (ADR-0017).
+#
+#   2. `confidence.base` is 0.55, below the 0.85 automatic-publication threshold,
+#      so validation gate 8 routes EVERY candidate from this source to human
+#      review. That is not pessimism about the extraction, which is exact; it is
+#      an honest statement that a candidate asserting "this advisory concerns
+#      FortiOS" is not a complete fact, because the feed never said which
+#      products are affected. product_match.product below supplies a product
+#      *hint*, which gate 1 resolves and a human confirms -- never a resolved
+#      fact. A comment would not survive the day somebody enables this source;
+#      the confidence score does.
+#
+# Advisory-to-product correlation is Phase 4 (security_advisories), and until it
+# exists no advisory from this feed is publishable as a release.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+
+metadata:
+  id: fortinet.psirt-advisories
+  vendor: fortinet
+  version: 1
+
+spec:
+  engine: rss_atom
+
+  product_match:
+    product: fortinet-fortios
+
+  fetch:
+    expected_content_type: text/xml
+    max_bytes: 1048576 # 1 MiB; the measured feed is 38 KB
+    timeout_seconds: 30
+    # Both an ETag and a Last-Modified are served; auto prefers the ETag.
+    conditional: auto
+
+  extract:
+    # RSS 2.0. Declared explicitly rather than left as `auto`: if Fortinet
+    # switched the feed to Atom, extracting nothing and warning is the repair
+    # signal we want, not silently reading a differently-shaped document.
+    release_container: item
+
+    fields:
+      version:
+        # The advisory identifier, read from the item's link. Every measured item
+        # has one; an item without one produces no candidate and a warning,
+        # which is the correct outcome for a feed entry FirmScout cannot name.
+        selector: link
+        regex: "(FG-IR-[0-9]{2}-[0-9]{3})"
+        transform: trim
+
+      release_date:
+        selector: pub_date
+        # RFC 1123 with a numeric zone, written out as the Go reference time.
+        # Every measured pubDate has a real day, month and year; the time
+        # component is 00:00:00 on all 50 items, so no time of day is claimed --
+        # PartialDate carries a date, never a clock reading.
+        date_format: "Mon, 02 Jan 2006 15:04:05 -0700"
+        precision: exact_day
+
+      release_notes_url:
+        selector: link
+        transform: trim
+
+    release_type: advisory
+
+    evidence_excerpt: title
+
+    confidence:
+      # See the header. Below the automatic-publication threshold on purpose.
+      base: 0.55
+      missing_optional_penalty: 0.1
+      floor: 0.55
+
+  schedule:
+    check_frequency_seconds: 21600
+    min_frequency_seconds: 7200

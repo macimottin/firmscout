@@ -1,0 +1,162 @@
+# =============================================================================
+# Source: Poly documentation portal -- the relocation pilot
+# =============================================================================
+# Registered so that "source URLs are not permanent, even a vendor's own" is a
+# row in the registry and not only a sentence in a document. The relocation is
+# recorded here as a measured redirect and as health: relocated.
+#
+# ------------------------- THE RELOCATION, MEASURED --------------------------
+# Measured 2026-09-05, FirmScout's declared User-Agent, no credentials:
+#
+#   GET https://docs.poly.com/bundle/
+#     -> HTTP/1.1 301, location: https://support.hp.com/bundle/
+#   GET https://support.hp.com/bundle/
+#     -> HTTP/2 200, content-type: text/html
+#
+# The redirect preserves the path. Two further probes establish that:
+#   GET https://docs.poly.com/anything/deep/path
+#     -> HTTP/1.1 301, location: https://support.hp.com/anything/deep/path
+#   GET https://docs.poly.com/
+#     -> 301 https://support.hp.com/ -> 302 /br-pt/ -> 301 /br-pt -> 200
+# so every docs.poly.com path is rewritten onto support.hp.com unchanged, and
+# only the bare root is additionally sent through HP's locale redirects.
+#
+# ---------------- WHY NO DOCUMENT URL IS REGISTERED, AND HOW WE KNOW ---------
+# The obvious registration would be a specific release-notes document. It is not
+# possible to make one honestly, and the reason was measured:
+#
+#   GET https://support.hp.com/bundle/g7500-release-notes/title-page
+#     -> HTTP/2 200, content-type: text/html, content-length: 7087
+#        etag: W/"6a885636-1baf"
+#        last-modified: Fri, 21 Aug 2026 13:44:22 GMT
+#   GET https://support.hp.com/anything/deep/path            (an invented path)
+#     -> HTTP/2 200, content-type: text/html, content-length: 7087
+#        etag: W/"6a885636-1baf"
+#        last-modified: Fri, 21 Aug 2026 13:44:22 GMT
+#
+# The two bodies are byte-identical:
+#   sha256 = 539f9cafcc98817e2eaadc28b9d675556410d0c890af0b1ecad08847ef21c6ae
+#
+# It is a single-page-application shell -- <base href="/">, deferred scripts, a
+# <noscript> fallback -- served for every path on the host and filled in by
+# JavaScript afterwards. Three things follow, and each is worth more than the
+# URL that would have been registered:
+#
+#   1. HTTP 200 from support.hp.com is not evidence that a document exists. A
+#      registry entry for .../g7500-release-notes/title-page would assert a
+#      document this pass cannot confirm, so no such entry was written.
+#   2. The ETag and Last-Modified belong to the shell, not to the content. A
+#      conditional GET would answer 304 forever while the release notes beneath
+#      changed freely. This source has no usable cheap change signal at all --
+#      worse than "no validator", because the validator that is present lies.
+#   3. Nor could a URL be found the other way round: HP's robots.txt declares
+#      eight sitemaps, and neither the document index (980 legacy sitemaps) nor
+#      the microsite index (43 sitemaps) covers the /bundle/ namespace.
+#
+# The registered URL is therefore the documentation bundle root, which is a
+# location that demonstrably exists and whose relocation was measured directly.
+# It is not a release-notes document, and this file does not pretend it is. The
+# roadmap describes Poly's release notes as PDFs; this pass did not verify that,
+# because it could not reach any document to look at.
+#
+# ------------------------------ ROBOTS -----------------------------------
+# Measured 2026-09-05T19:45:33Z:
+#   GET https://docs.poly.com/robots.txt
+#     -> HTTP/1.1 301, location: https://support.hp.com/robots.txt
+#   GET https://support.hp.com/robots.txt
+#     -> HTTP/2 200, content-type: text/plain, content-length: 1882
+#        last-modified: Thu, 14 May 2026 08:38:29 GMT, etag: W/"6a058a05-75a"
+#     -> exactly ONE group, the wildcard one ("User-agent: *" appears once, on
+#        line 7), carrying Crawl-delay: 1 and Request-rate: 1/2, plus:
+#          Disallow: /wps/portal            Disallow: /wps/mycontenthandler/pps
+#          Disallow: /wps/hp-skp-portlets/render/
+#          Disallow: /wps/hp-skp-portlets/kaas/
+#          Disallow: /error/                Disallow: /renderdocument/
+#          Disallow: /wcc-assets/images/    Disallow: /wcc-assets/videos/
+#          Disallow: /wcc-services*
+#          Disallow: /*?*q=                 Disallow: /*?*search=
+#          Disallow: /*?*query=
+#          Disallow: /auth/                 Disallow: /login/
+#          Disallow: /logout/               Disallow: /session/
+#          Allow:    /wcc-assets/*.css      Allow: /wcc-assets/*.js
+#     -> no rule matches /bundle/.
+#
+# robots_policy_status is "allowed", and that is a change from what
+# DATA_SOURCES.md previously recorded ("unknown"). It is recorded as allowed
+# because it was determined, not assumed: docs.poly.com publishes no robots.txt
+# of its own and redirects the request cross-host, RFC 9309 sec 2.3.1.2 requires
+# a crawler to follow that redirect, and FirmScout's own RobotsCache.fetch does
+# follow it deliberately ("a robots.txt that redirects to a CDN on another host
+# is normal and is followed", internal/adapters/fetch/robots.go). The file that
+# answers is HP's, and it does not restrict this path. Writing "unknown" when
+# the question was answered would be the mirror of the error this registry
+# exists to avoid.
+#
+# The residual doubt is recorded rather than hidden: robots.txt is scoped to a
+# scheme, host and port, and a cross-authority 301 means docs.poly.com has
+# delegated its crawl policy to a host it does not obviously control. That is a
+# human's call to revisit, not a reason to overwrite a measurement.
+#
+# HP declares Crawl-delay: 1 and Request-rate: 1/2. The fetcher's minimum
+# interval is set far above both.
+#
+# ------------------------------- ADR-0018 ------------------------------------
+# enabled: false and terms_review_status: pending. Nobody has read HP's website
+# terms. Beyond that, there is nothing here a collector could read: the only
+# candidate engine for the described PDFs is pdf_text, which is a declared but
+# unimplemented roadmap engine (internal/adapters/collectors/config.go), and the
+# reachable bytes are a JavaScript shell that no config engine can extract from.
+# So there is deliberately NO collector config and collector_id is empty: a
+# config would claim a capability that does not exist.
+#
+# health is "relocated": the fetcher's own vocabulary for "this source left the
+# host it was registered at", observed here by hand rather than by a check.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: documentation-portal
+  vendor: poly
+
+spec:
+  # No product: no per-product document URL on the new host could be verified.
+  source_type: html_page
+  url: https://docs.poly.com/bundle/
+
+  # Authority. official is true -- both docs.poly.com and its redirect target are
+  # controlled by the manufacturer group after the acquisition. The quality class
+  # is authorized_portal rather than official_manufacturer because the content no
+  # longer lives on the manufacturer brand's own domain; DATA_SOURCES.md names
+  # this exact case ("support.hp.com hosting former Poly documentation") as the
+  # archetype of that class. A relocation onto a parent's portal is a step away
+  # from first-party, and the registry should say so.
+  official: true
+  quality_class: authorized_portal
+
+  # Compliance -- the measurements are quoted in full above.
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-05T19:45:33Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: nobody has read HP's website terms. Measured 2026-09-05:
+    docs.poly.com serves no robots.txt of its own and 301s the request to
+    support.hp.com/robots.txt, whose single wildcard group disallows sixteen
+    prefixes, none of which matches /bundle/, and which declares Crawl-delay: 1
+    and Request-rate: 1/2. Robots therefore permits this path, but the terms
+    behind the acquisition have not been reviewed and the reachable content is a
+    JavaScript shell no engine can read, so nothing is collected.
+  authentication_type: none
+
+  # Not collected from. Nothing here is collectable yet in any case.
+  enabled: false
+  health: relocated
+
+  # No collector_id: no collector config exists for this source, deliberately.
+  expected_content_type: text/html
+
+  # Daily is nominal; this source is never dispatched. The minimum is set to an
+  # hour, comfortably above HP's declared Crawl-delay: 1 and Request-rate: 1/2.
+  check_frequency_seconds: 86400
+  min_frequency_seconds: 3600

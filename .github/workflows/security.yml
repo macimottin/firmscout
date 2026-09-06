@@ -23,20 +23,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The inputs below are this action's own. The previous set -- path, format and a
+      # long `args` list of --disable-assembly, --enable-golang and friends -- were OWASP
+      # Dependency-Check flags that this action does not define and silently ignored, so
+      # the job had never actually been configured. It also never ran: `on: pull_request`
+      # means it first executed on the repository's first pull request.
+      #
+      # It needs GitHub's Dependency graph enabled for the repository
+      # (Settings -> Code security -> Dependency graph). Without it the action fails with
+      # "Dependency review is not supported on this repository", which is a setting to
+      # turn on, not a finding. It is left failing rather than made warn-only on purpose:
+      # a security job that passes by doing nothing is the failure mode this file's own
+      # govulncheck comment already refuses.
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
-          path: '.'
-          format: 'SARIF'
-          args: >-
-            -s .
-            --disable-assembly
-            --disable-javascript
-            --disable-python
-            --disable-ruby
-            --disable-rust
-            --enable-golang
-            --enable-nodejs
-            --scan-dot-net-dll=false
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
 
   govulncheck:
     runs-on: ubuntu-latest
@@ -78,7 +81,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # GITHUB_TOKEN is required for the pull_request event: without it the action
+      # refuses to scan and exits non-zero before looking at a single byte, which reads
+      # like a leaked secret and is not one. This only surfaced on the repository's first
+      # pull request, because every earlier run was a push to main.
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   codeql:
     permissions:

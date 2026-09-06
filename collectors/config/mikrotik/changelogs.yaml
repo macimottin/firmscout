@@ -71,21 +71,41 @@ spec:
         transform: trim
 
       channel:
-        # The badge wrapper carries the stable class "uppercase"; the badge
-        # itself is its only child. Selecting by the badge's own colour class
-        # (bg-green, bg-blue, ...) would break the moment MikroTik recoloured a
-        # channel, which is a styling change, not a data change.
-        selector: "div.uppercase > div"
-        transform: [trim, lowercase]
-        # An unmapped badge label is a hard error for that candidate, never a
-        # pass-through. A label nobody has interpreted is not evidence for any
-        # channel, and guessing is how an unreviewed development build ends up
-        # presented as stable.
-        map:
-          long-term: long_term
-          stable: stable
-          testing: testing
-          development: development
+        # A constant, not a selector, and the reason is measured rather than
+        # stylistic. Re-measured 2026-09-06 against the live page:
+        #
+        #   GET https://mikrotik.com/download/changelogs
+        #     -> the embedded Livewire state carries channelFilter":"longTerm",
+        #        and the server renders ONLY that channel's entries: 47 of them,
+        #        every one badged "Long-term", with no Testing or Development
+        #        badge anywhere on the page.
+        #     -> no unfiltered view is reachable by a plain GET. ?channel=all
+        #        returns the identical 413255-byte long-term page;
+        #        ?channelFilter=all returns a 231990-byte page with no entries
+        #        at all; /changelogs/all is a 302. The filter is Livewire state
+        #        changed by an interaction, not a query parameter.
+        #
+        # So the honest channel for anything read here is a fact about WHICH
+        # PAGE was fetched, not about a badge inside it: this endpoint is
+        # MikroTik's long-term listing.
+        #
+        # Reading the badge instead was actively wrong, and this is the defect
+        # that motivated the constant. Four entries -- 6.49.18, 6.49.19, 6.49.20
+        # and 6.49.21 -- carry TWO badges, "Stable" and "Long-term", because
+        # those releases are both the long-term line and the stable of the v6
+        # line. "Stable" is rendered first, and the engine silently took the
+        # first match, so four long-term releases were recorded as stable. They
+        # then disagreed with upgrade.mikrotik.com/routeros/NEWESTa7.stable --
+        # which reports the v7 line, as its own filename says -- and the
+        # platform booked a multi-source conflict that never existed.
+        #
+        # WHAT THIS CONSTANT DOES NOT SURVIVE: if MikroTik changes the default
+        # view to "All", this config would label testing and development builds
+        # as long-term, silently. The guard is testdata/fixtures/mikrotik: the
+        # committed fixture now includes a real dual-badge entry, so a change in
+        # the page's structure breaks a test rather than the catalogue. Re-check
+        # the filter state when that fixture is next refreshed.
+        value: long_term
 
       release_date:
         # The date is plain text inside the entry with no class of its own, so
