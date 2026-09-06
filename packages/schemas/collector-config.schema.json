@@ -333,8 +333,56 @@
         },
         "default": {
           "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "description": "A literal this field always produces, for a fact that is true of the SOURCE rather than readable from the document -- for example a page that is itself a filtered listing, where the channel is decided by which URL was fetched. Mutually exclusive with selector, attribute, regex and multiple: a field either reads the page or states a constant, never both."
+        },
+        "multiple": {
+          "type": "string",
+          "enum": [
+            "error",
+            "first"
+          ],
+          "default": "error",
+          "description": "What to do when the selector matches more than one element. Defaults to \"error\", which skips the candidate and names what matched; \"first\" takes document order as a deliberate, recorded decision. Only meaningful for the html_selectors engine."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "value"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "selector"
+                  ]
+                },
+                {
+                  "required": [
+                    "attribute"
+                  ]
+                },
+                {
+                  "required": [
+                    "regex"
+                  ]
+                },
+                {
+                  "required": [
+                    "multiple"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
     },
     "transform": {
       "oneOf": [

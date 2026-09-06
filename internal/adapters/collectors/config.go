@@ -277,12 +277,30 @@ type FieldSpec struct {
 	// Required defaults to true. An optional field that produces nothing lowers the
 	// candidate's confidence instead of discarding the candidate.
 	Required *bool `yaml:"required"`
+	// Value is a literal this field always produces, for a fact that is true of the
+	// SOURCE rather than readable from the document. It is mutually exclusive with
+	// Selector, Attribute and Regex: a field either reads the page or states a
+	// constant, never both, so a reader can tell at a glance which one a value came
+	// from. Transforms and Map still run, so a literal is checked by the same
+	// vocabulary as an extracted value.
+	Value string `yaml:"value"`
+	// Multiple decides what happens when a selector matches more than one element.
+	//
+	// It defaults to MultipleError, and that default is the point. The engine used to
+	// take the first match and discard the rest in silence, which is the same class of
+	// guess Map already refuses to make: MikroTik's changelog marks its newest v6
+	// releases with two channel badges, Stable and Long-term, and first-wins recorded
+	// four long-term releases as stable purely because Stable is rendered first. The
+	// vendor said two things; the engine picked one by document order and told nobody.
+	// A config that genuinely wants the first match now has to say so.
+	Multiple string `yaml:"multiple"`
 
-	name  string
-	sel   cascadia.Selector
-	scope bool
-	group string
-	re    *regexp.Regexp
+	name    string
+	sel     cascadia.Selector
+	scope   bool
+	literal bool
+	group   string
+	re      *regexp.Regexp
 }
 
 // IsRequired reports whether the field must produce a value.
@@ -291,6 +309,20 @@ func (f *FieldSpec) IsRequired() bool { return f.Required == nil || *f.Required 
 // EpochSecondsFormat is the date_format value meaning "the text is a Unix timestamp in
 // seconds" rather than a Go layout.
 const EpochSecondsFormat = "epoch_seconds"
+
+// Policies for a selector that matches more than one element. See FieldSpec.Multiple.
+const (
+	// MultipleError skips the candidate and says what matched. The default.
+	MultipleError = "error"
+	// MultipleFirst takes the first match in document order. An explicit, recorded
+	// decision that document order is meaningful for this field on this page.
+	MultipleFirst = "first"
+)
+
+// ValidMultiplePolicy reports whether p is a policy the engines implement.
+func ValidMultiplePolicy(p string) bool {
+	return p == MultipleError || p == MultipleFirst
+}
 
 // Field names the engines give meaning to. Any other key under spec.extract.fields is
 // rejected at load time rather than silently ignored, because a field named "verison"
@@ -829,8 +861,36 @@ func (c *Config) validateField(name string, f *FieldSpec) error {
 	f.name = name
 	fieldPath := "spec.extract.fields." + name
 
+	// A literal states a fact about the source; a selector reads one from the
+	// document. Allowing both would leave a reader unable to tell which produced a
+	// value, and would let a stale selector sit unnoticed behind a constant.
+	if f.Value != "" {
+		switch {
+		case strings.TrimSpace(f.Selector) != "":
+			return fieldErr(fieldPath+".value", "cannot be combined with .selector: a field either reads the page or states a constant")
+		case f.Attribute != "":
+			return fieldErr(fieldPath+".value", "cannot be combined with .attribute")
+		case f.Regex != "":
+			return fieldErr(fieldPath+".value", "cannot be combined with .regex")
+		case f.Multiple != "":
+			return fieldErr(fieldPath+".value", "cannot be combined with .multiple: a constant matches exactly once")
+		}
+		f.literal = true
+		return c.validateValuePipeline(fieldPath, name, f)
+	}
+
+	if f.Multiple == "" {
+		f.Multiple = MultipleError
+	}
+	if !ValidMultiplePolicy(f.Multiple) {
+		return fieldErr(fieldPath+".multiple", "%q is not a policy; use %q or %q", f.Multiple, MultipleError, MultipleFirst)
+	}
+	if f.Multiple != MultipleError && c.Spec.Engine != EngineHTMLSelectors {
+		return fieldErr(fieldPath+".multiple", "is only meaningful for the %s engine; other engines match exactly once by construction", EngineHTMLSelectors)
+	}
+
 	if strings.TrimSpace(f.Selector) == "" {
-		return fieldErr(fieldPath+".selector", "must be set (use %q for the container itself)", ScopeSelector)
+		return fieldErr(fieldPath+".selector", "must be set (use %q for the container itself), or set .value for a constant", ScopeSelector)
 	}
 	switch {
 	case f.Selector == ScopeSelector:
@@ -872,6 +932,14 @@ func (c *Config) validateField(name string, f *FieldSpec) error {
 		f.re = re
 	}
 
+	return c.validateValuePipeline(fieldPath, name, f)
+}
+
+// validateValuePipeline checks everything that happens to a field's value AFTER it has
+// been obtained, which is identical whether the value was read from the document or
+// declared as a literal. Keeping it in one function is what stops a constant from
+// escaping the vocabulary check a selected value has to pass.
+func (c *Config) validateValuePipeline(fieldPath, name string, f *FieldSpec) error {
 	for i := range f.Transform {
 		if err := validateTransform(fieldPath, i, &f.Transform[i], f, name); err != nil {
 			return err

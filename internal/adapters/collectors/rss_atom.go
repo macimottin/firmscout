@@ -389,12 +389,14 @@ type feedContainer struct {
 // practice -- an rss_atom field's text is either present or it is not -- so located is
 // simply whether the resolved text is non-empty. That is what makes a pub_date selector
 // against an Atom entry carrying only <updated> report honestly that nothing was found.
-func (c *feedContainer) value(f *FieldSpec) (string, bool) {
+func (c *feedContainer) value(f *FieldSpec) (string, bool, error) {
 	if f.scope {
-		return c.scopeText(), true
+		return c.scopeText(), true, nil
 	}
 	v := c.entry.fieldText(f.Selector)
-	return v, v != ""
+	// No error is possible: the feed-field vocabulary is closed and each name resolves
+	// to exactly one value per entry, so FieldSpec.Multiple has nothing to govern here.
+	return v, v != "", nil
 }
 
 // excerpt returns the evidence text for this entry.

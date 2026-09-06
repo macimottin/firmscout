@@ -59,6 +59,100 @@ spec:
     evidence_excerpt: ":scope"
 `
 
+// syntheticChannelBadgeConfig reads the channel from the page's badge, which is what
+// the shipped MikroTik config used to do before it was corrected to a constant.
+//
+// The engine rules about badges -- an unmapped label is a hard error, and a selector
+// matching several badges is a hard error unless the config opts in -- are properties of
+// the ENGINE, not of MikroTik. They used to be tested through the shipped config, so
+// changing that config deleted their coverage. Testing them here instead keeps the rule
+// and the vendor independent: MikroTik's channel can be whatever the page justifies
+// without a badge rule silently losing its test.
+const syntheticChannelBadgeConfig = `
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+metadata:
+  id: synthetic.channel-badge
+  vendor: mikrotik
+  version: 1
+spec:
+  engine: html_selectors
+  product_match:
+    product: mikrotik-routeros
+  normalize:
+    section_selector: "div.changelog-header"
+    strip: [script, style]
+  extract:
+    release_container: "div.changelog-header"
+    fields:
+      version:
+        selector: "span.font-bold"
+        transform: trim
+      channel:
+        selector: "div.uppercase > div"
+        transform: [trim, lowercase]
+        map:
+          long-term: long_term
+          stable: stable
+      release_date:
+        selector: ":scope"
+        regex: "(\\d{4}-\\d{2}-\\d{2})"
+        date_format: "2006-01-02"
+        precision: exact_day
+    release_type: embedded_os
+    evidence_excerpt: ":scope"
+`
+
+// syntheticChannelBadgeFirstConfig is the same config opting in to document order.
+const syntheticChannelBadgeFirstConfig = `
+apiVersion: firmscout.dev/v1alpha1
+kind: CollectorConfig
+metadata:
+  id: synthetic.channel-badge-first
+  vendor: mikrotik
+  version: 1
+spec:
+  engine: html_selectors
+  product_match:
+    product: mikrotik-routeros
+  normalize:
+    section_selector: "div.changelog-header"
+    strip: [script, style]
+  extract:
+    release_container: "div.changelog-header"
+    fields:
+      version:
+        selector: "span.font-bold"
+        transform: trim
+      channel:
+        selector: "div.uppercase > div"
+        multiple: first
+        transform: [trim, lowercase]
+        map:
+          long-term: long_term
+          stable: stable
+      release_date:
+        selector: ":scope"
+        regex: "(\\d{4}-\\d{2}-\\d{2})"
+        date_format: "2006-01-02"
+        precision: exact_day
+    release_type: embedded_os
+    evidence_excerpt: ":scope"
+`
+
+func newSyntheticBadgeCollector(t *testing.T, cfgText string) *collectors.HTMLSelectors {
+	t.Helper()
+	cfg, err := collectors.LoadConfig([]byte(cfgText))
+	if err != nil {
+		t.Fatalf("load synthetic badge config: %v", err)
+	}
+	c, err := collectors.NewHTMLSelectors(cfg, nil)
+	if err != nil {
+		t.Fatalf("build synthetic badge collector: %v", err)
+	}
+	return c
+}
+
 // loadShippedConfig returns the checked-in config with the given id.
 func loadShippedConfig(t *testing.T, id string) collectors.Config {
 	t.Helper()
@@ -101,6 +195,14 @@ func newSyntheticMonthOnlyCollector(t *testing.T) *collectors.HTMLSelectors {
 // every fixture that declares it.
 func TestHTMLSelectorsFixtures(t *testing.T) {
 	collectortest.RunFixtures(t, newShippedHTMLCollector(t, "mikrotik.changelogs"), fixturesDir)
+}
+
+// TestHTMLSelectorsChannelBadgeFixtures runs the synthetic badge-reading collector, so
+// the fixtures that exist to exercise badge handling are actually compared rather than
+// merely present. Without this the unmapped-channel expectation would be skipped by
+// RunFixtures' collectorId filter and silently stop testing anything.
+func TestHTMLSelectorsChannelBadgeFixtures(t *testing.T) {
+	collectortest.RunFixtures(t, newSyntheticBadgeCollector(t, syntheticChannelBadgeConfig), fixturesDir)
 }
 
 // TestHTMLSelectorsMonthOnlyFixture runs the synthetic month-precision collector.
@@ -214,7 +316,7 @@ func TestEmptyVersionIsSkippedWithAReason(t *testing.T) {
 // TestUnmappedChannelIsAHardErrorForThatCandidate: an unrecognised badge fails
 // loudly for the candidate that carried it, and only for that candidate.
 func TestUnmappedChannelIsAHardErrorForThatCandidate(t *testing.T) {
-	c := newShippedHTMLCollector(t, "mikrotik.changelogs")
+	c := newSyntheticBadgeCollector(t, syntheticChannelBadgeConfig)
 	body, err := os.ReadFile(fixturesDir + "/unmapped-channel.fixture.html")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
@@ -337,4 +439,82 @@ func containsSubstr(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// TestSeveralBadgesIsAHardErrorByDefault is the revert detector for the silent
+// first-match-wins the engine used to do.
+//
+// The fixture's 6.49.21 entry is real markup from the live page: MikroTik badges its
+// newest v6 releases both "Stable" and "Long-term", Stable first. Reading the badge
+// without saying how to choose used to yield "stable" for a long-term release, and the
+// resulting version disagreement was booked as a multi-source conflict that never
+// existed. The engine must now refuse rather than pick.
+func TestSeveralBadgesIsAHardErrorByDefault(t *testing.T) {
+	c := newSyntheticBadgeCollector(t, syntheticChannelBadgeConfig)
+	body, err := os.ReadFile(fixturesDir + "/changelogs.fixture.html")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	candidates, warnings, err := c.ExtractWithWarnings(context.Background(), fixtureSource(c), fixtureArtifact(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, cand := range candidates {
+		if cand.Version.Raw() == "6.49.21" {
+			t.Fatalf("the dual-badge entry produced a candidate with channel %q; "+
+				"the page declared two channels and the engine chose one silently",
+				cand.Applicability.Channel)
+		}
+	}
+	if !containsSubstr(warnings, "matched 2 elements") {
+		t.Errorf("expected a warning naming the ambiguity; got %v", warnings)
+	}
+	// Only that candidate is lost. A page whose shape changed in one entry must not
+	// discard the entries that are still readable.
+	if len(candidates) != 3 {
+		t.Errorf("want the 3 single-badge candidates to survive, got %d", len(candidates))
+	}
+}
+
+// TestSeveralBadgesCanBeOptedIntoDeliberately: document order is available, but only
+// to a config that writes it down.
+func TestSeveralBadgesCanBeOptedIntoDeliberately(t *testing.T) {
+	c := newSyntheticBadgeCollector(t, syntheticChannelBadgeFirstConfig)
+	body, err := os.ReadFile(fixturesDir + "/changelogs.fixture.html")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	candidates, _, err := c.ExtractWithWarnings(context.Background(), fixtureSource(c), fixtureArtifact(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var found bool
+	for _, cand := range candidates {
+		if cand.Version.Raw() == "6.49.21" {
+			found = true
+			if got := cand.Applicability.Channel; got != "stable" {
+				t.Errorf("with multiple: first the first badge decides; want stable, got %q", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the dual-badge candidate was skipped despite an explicit multiple policy")
+	}
+}
+
+// TestShippedMikroTikChannelIsTheListingNotTheBadge pins the corrected config: the
+// channel is a fact about which page was fetched, so every candidate from MikroTik's
+// long-term listing is long_term -- including the entry whose badges say otherwise.
+func TestShippedMikroTikChannelIsTheListingNotTheBadge(t *testing.T) {
+	candidates := extractFixture(t, newShippedHTMLCollector(t, "mikrotik.changelogs"), "changelogs.fixture.html")
+	if len(candidates) != 4 {
+		t.Fatalf("want 4 candidates, got %d", len(candidates))
+	}
+	for _, c := range candidates {
+		if got := c.Applicability.Channel; got != "long_term" {
+			t.Errorf("%s: channel = %q, want long_term", c.Version.Raw(), got)
+		}
+	}
 }

@@ -187,12 +187,15 @@ func newTextContainer(cfg Config, text string, names []string, match []int) *tex
 // value returns the whole match for a ":scope" selector, or the text of the named
 // capture group the selector names. The group's existence was verified at config load
 // time, so a miss here means the group did not participate in this particular match.
-func (c *textContainer) value(f *FieldSpec) (string, bool) {
+func (c *textContainer) value(f *FieldSpec) (string, bool, error) {
 	if f.scope {
-		return c.whole, true
+		return c.whole, true, nil
 	}
 	v, ok := c.groups[f.group]
-	return v, ok
+	// No error is possible: a named capture group holds exactly one value per match,
+	// so the multiplicity FieldSpec.Multiple governs cannot arise here. Config
+	// validation refuses a non-default policy on this engine for the same reason.
+	return v, ok, nil
 }
 
 func (c *textContainer) excerpt() string {

@@ -29,9 +29,26 @@ type container interface {
 	// selector located anything at all. A located-but-empty value is ("", true):
 	// that distinction is the difference between "the page changed shape" and "the
 	// vendor left this blank".
-	value(f *FieldSpec) (string, bool)
+	// A field declaring a literal never reaches an engine: buildCandidate answers it
+	// directly. An error means the document said something the config did not
+	// anticipate -- currently only a selector matching several elements under the
+	// default MultipleError policy -- and is handled exactly like an unmapped label.
+	value(f *FieldSpec) (string, bool, error)
 	// excerpt returns the evidence text for this container.
 	excerpt() string
+}
+
+// fieldRaw obtains a field's raw value: the declared literal when the field states a
+// constant, otherwise whatever the engine's container locates.
+//
+// The literal short-circuits before any engine is consulted, which is what makes
+// FieldSpec.Value engine-independent and what lets validation forbid pairing it with a
+// selector: there is no path here that could read both and prefer one.
+func fieldRaw(c container, f *FieldSpec) (string, bool, error) {
+	if f.literal {
+		return f.Value, true, nil
+	}
+	return c.value(f)
 }
 
 // buildCandidate assembles one candidate from one container.
@@ -54,8 +71,11 @@ func buildCandidate(cfg *Config, index int, c container) (domain.CandidateReleas
 		if !declared {
 			return "", false, true
 		}
-		raw, located := c.value(f)
+		raw, located, verr := fieldRaw(c, f)
 		out, err := applyPipeline(f, raw)
+		if verr != nil {
+			err = verr
+		}
 		if err != nil {
 			// An unmapped label is a hard error for this candidate, never a
 			// pass-through: a vendor badge nobody has interpreted must not be
@@ -196,8 +216,11 @@ func resolveDate(cfg *Config, label string, c container, name string, missingOpt
 		return domain.UnknownDate, nil
 	}
 
-	raw, located := c.value(f)
+	raw, located, verr := fieldRaw(c, f)
 	text, err := applyPipeline(f, raw)
+	if verr != nil {
+		err = verr
+	}
 	if err != nil {
 		*missingOptional++
 		return domain.UnknownDate, []string{fmt.Sprintf("%s: field %q: %v; release date recorded as unknown", label, name, err)}

@@ -1,5 +1,5 @@
 {
-  "collectorId": "mikrotik.changelogs",
+  "collectorId": "synthetic.channel-badge",
   "note": "SYNTHETIC. A channel badge nobody has interpreted ('Nightly') is a hard error for that candidate, never a pass-through. The entry with a known badge is unaffected.",
   "warningsContain": [
     "value \"nightly\" has no entry in the field's map"
