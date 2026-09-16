@@ -720,9 +720,9 @@ type SearchResultItemDTO struct {
 	// Category is the product's most specific classification slug when one is recorded
 	// (see primaryCategorySlug). Omitted when the product has none: a search hit without
 	// a type is still a valid hit; inventing a category here would be worse than silence.
-	Category string     `json:"category,omitempty"`
-	Vendor   *VendorRef `json:"vendor,omitempty"`
-	MatchedOn string    `json:"matchedOn"`
+	Category  string     `json:"category,omitempty"`
+	Vendor    *VendorRef `json:"vendor,omitempty"`
+	MatchedOn string     `json:"matchedOn"`
 }
 
 // SearchResponse is the `SearchResponse` schema.

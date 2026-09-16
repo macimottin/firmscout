@@ -268,6 +268,10 @@ func TestEveryDeviceCarriesAModelNumberAlias(t *testing.T) {
 // must actually name a there, and the slug it names must resolve. The loader cannot
 // check the second half -- it parses one file at a time -- so the dataset-wide check
 // lives here rather than in parseProduct.
+//
+// ADR-0024 allows a device to also publish its own stream (a server with BIOS, a
+// USB conference camera with its own firmware). That product is the destination,
+// so a missing runs_os is not a dead end.
 func TestDeviceDocumentsDeclareTheOSTheyRun(t *testing.T) {
 	t.Parallel()
 	l := registry.New(os.DirFS("../../.."), "dataset")
@@ -299,9 +303,10 @@ func TestDeviceDocumentsDeclareTheOSTheyRun(t *testing.T) {
 					d.Path, d.Product.Slug, r.ToProductID)
 			}
 		}
-		if !runsAnOS {
-			t.Errorf("%s: hardware model %q declares no runs_os relationship, so its page would "+
-				"name no operating system and lead nowhere", d.Path, d.Product.Slug)
+		if !runsAnOS && d.Product.DefaultReleaseType == "" {
+			t.Errorf("%s: hardware model %q declares no runs_os relationship and publishes no "+
+				"release stream of its own, so its page would name no operating system and lead nowhere",
+				d.Path, d.Product.Slug)
 		}
 	}
 }

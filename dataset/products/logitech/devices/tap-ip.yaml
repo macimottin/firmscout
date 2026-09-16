@@ -33,6 +33,12 @@ spec:
         SKU is not claimed here.
 
   aliases:
+    - alias: "952-000085"
+      kind: model_number
+      source_note: >-
+        Primary part number on
+        https://www.logitech.com/en-us/products/video-conferencing/tap-ip.html,
+        fetched 2026-09-16T02:13:26Z.
     - alias: "952-000088"
       kind: sku
       source_note: >-

@@ -40,6 +40,11 @@ spec:
         the Rally Bar build (2.1.176).
 
   aliases:
+    - alias: "960-001680"
+      kind: model_number
+      source_note: >-
+        Primary US hardware part number for MeetUp 2 in Logitech Sync's
+        hardware-to-service SKU mapping guide, fetched 2026-09-16T02:13:26Z.
     - alias: "960-001681"
       kind: sku
       source_note: >-

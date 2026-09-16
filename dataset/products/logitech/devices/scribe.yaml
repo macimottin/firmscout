@@ -1,7 +1,8 @@
 # =============================================================================
 # Device: Logitech Scribe
 # =============================================================================
-# Whiteboard camera for hybrid meeting rooms.
+# Whiteboard camera for hybrid meeting rooms. Not named on the CollabOS device
+# list we fetched, so it is not claimed to run logitech-collabos.
 #
 # Provenance:
 #   GET https://www.logitech.com/en-us/products/video-conferencing/scribe.html
@@ -18,12 +19,19 @@ metadata:
 spec:
   name: Scribe
   model_identifier: "960-001332"
+  default_release_type: firmware
   lifecycle_status: unknown
 
   category_slugs:
     - collaboration-devices
 
   aliases:
+    - alias: "960-001332"
+      kind: model_number
+      source_note: >-
+        Primary part number on
+        https://www.logitech.com/en-us/products/video-conferencing/scribe.html,
+        fetched 2026-09-16T02:13:26Z.
     - alias: Logitech Scribe
       kind: marketing_name
       source_note: Full product name as used on logitech.com.

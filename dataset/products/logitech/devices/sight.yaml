@@ -1,7 +1,9 @@
 # =============================================================================
 # Device: Logitech Sight
 # =============================================================================
-# Tabletop multi-participant camera for medium and large meeting rooms.
+# Tabletop multi-participant camera for medium and large meeting rooms. Not
+# named on the CollabOS device list we fetched, so it is not claimed to run
+# logitech-collabos.
 #
 # Provenance:
 #   GET https://www.logitech.com/en-us/products/video-conferencing/sight.html
@@ -18,12 +20,19 @@ metadata:
 spec:
   name: Sight
   model_identifier: "960-001503"
+  default_release_type: firmware
   lifecycle_status: unknown
 
   category_slugs:
     - collaboration-devices
 
   aliases:
+    - alias: "960-001503"
+      kind: model_number
+      source_note: >-
+        Primary part number on
+        https://www.logitech.com/en-us/products/video-conferencing/sight.html,
+        fetched 2026-09-16T02:13:26Z.
     - alias: "960-001510"
       kind: sku
       source_note: >-

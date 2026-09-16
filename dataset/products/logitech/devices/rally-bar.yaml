@@ -36,6 +36,12 @@ spec:
         model is not claimed here.
 
   aliases:
+    - alias: "960-001308"
+      kind: model_number
+      source_note: >-
+        Graphite part number in the product URL and selector on
+        https://www.logitech.com/en-us/products/video-conferencing/room-solutions/rallybar.960-001308.html,
+        fetched 2026-09-16T02:13:26Z.
     - alias: "960-001320"
       kind: sku
       source_note: >-

@@ -32,6 +32,12 @@ spec:
         device. Which CollabOS build belongs on this exact model is not claimed.
 
   aliases:
+    - alias: "960-001336"
+      kind: model_number
+      source_note: >-
+        Graphite part number on
+        https://www.logitech.com/en-us/products/video-conferencing/room-solutions/rallybarmini.html,
+        fetched 2026-09-16T02:13:26Z.
     - alias: "960-001348"
       kind: sku
       source_note: >-

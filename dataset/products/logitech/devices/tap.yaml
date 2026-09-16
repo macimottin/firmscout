@@ -1,7 +1,9 @@
 # =============================================================================
 # Device: Logitech Tap
 # =============================================================================
-# Touch controller for meeting rooms (USB compute attachment).
+# Touch controller for meeting rooms (USB compute attachment). Firmware is
+# recorded as this product's own stream: the CollabOS device list we fetched
+# names Tap IP, not Tap, so there is no runs_os edge to logitech-collabos.
 #
 # Provenance:
 #   GET https://www.logitech.com/en-us/products/video-conferencing/tap.html
@@ -18,12 +20,19 @@ metadata:
 spec:
   name: Tap
   model_identifier: "939-001950"
+  default_release_type: firmware
   lifecycle_status: unknown
 
   category_slugs:
     - collaboration-devices
 
   aliases:
+    - alias: "939-001950"
+      kind: model_number
+      source_note: >-
+        Primary part number on
+        https://www.logitech.com/en-us/products/video-conferencing/tap.html,
+        fetched 2026-09-16T02:13:26Z.
     - alias: Logitech Tap
       kind: marketing_name
       source_note: >-

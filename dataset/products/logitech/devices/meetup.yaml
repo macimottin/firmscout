@@ -25,6 +25,12 @@ spec:
     - collaboration-devices
 
   aliases:
+    - alias: "960-001101"
+      kind: model_number
+      source_note: >-
+        Primary part number on
+        https://www.logitech.com/en-us/products/video-conferencing/conference-cameras/meetup.html,
+        fetched 2026-09-16T02:13:26Z.
     - alias: "960-001201"
       kind: sku
       source_note: >-
