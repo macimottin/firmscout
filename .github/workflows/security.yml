@@ -85,7 +85,7 @@ jobs:
       # refuses to scan and exits non-zero before looking at a single byte, which reads
       # like a leaked secret and is not one. This only surfaced on the repository's first
       # pull request, because every earlier run was a push to main.
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
