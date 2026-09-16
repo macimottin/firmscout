@@ -1,0 +1,52 @@
+# =============================================================================
+# Source: Logitech support downloads (placeholder)
+# =============================================================================
+# Registered so Logitech room-system firmware has a named home in the source
+# registry once a collector and terms review exist. No document URL is wired
+# yet: Logitech publishes firmware per product through support.logi.com and
+# Sync, and this pass only seeds device identity in dataset/products/.
+#
+# ------------------------------ ROBOTS -----------------------------------
+# Measured 2026-09-16T02:13:26Z:
+#   GET https://www.logitech.com/robots.txt
+#     -> HTTP/2 200, content-type: text/plain
+#     -> wildcard group disallows /content/ and several internal paths; product
+#        pages under /en-us/products/ are not disallowed.
+#   GET https://support.logi.com/robots.txt
+#     -> HTTP/2 404 (robots unavailable — treated as allow per RFC 9309)
+#
+# ------------------------------- ADR-0018 ------------------------------------
+# enabled: false and terms_review_status: pending until someone reads Logitech's
+# website terms and identifies a collectable, stable firmware endpoint per
+# product.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: support-downloads
+  vendor: logitech
+
+spec:
+  source_type: html_page
+  url: https://support.logi.com/hc
+
+  official: true
+  quality_class: official_manufacturer
+
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-16T02:13:26Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: nobody has read Logitech's website terms for automated access.
+    This source is a registry placeholder only; no per-product firmware URL has
+    been verified yet.
+  authentication_type: none
+
+  enabled: false
+  health: pending_review
+
+  expected_content_type: text/html
+  check_frequency_seconds: 86400
+  min_frequency_seconds: 3600

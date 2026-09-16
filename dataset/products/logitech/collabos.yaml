@@ -1,0 +1,44 @@
+# =============================================================================
+# Product: Logitech CollabOS
+# =============================================================================
+# CollabOS is the embedded operating system Logitech ships on Rally Bar, Rally
+# Bar Mini, MeetUp 2, Tap IP, RoomMate and related room appliances. It is
+# registered as one product with its own version stream rather than one stream
+# per device: Logitech publishes CollabOS release notes under that name, and
+# the build number on a Rally Bar page is not claimed to apply to a MeetUp 2
+# (those notes carry a different build). See ADR-0024: a runs edge is
+# navigation, not per-model applicability.
+#
+# Provenance for the name and the device list:
+#   GET https://hub.sync.logitech.com/collabosguides/post/1-5-how-to-update-collabos-devices-1wt82xY9LTMStHl
+#     fetched 2026-09-16T02:16:00Z, HTTP 200.
+#   The page names Rally Bar, Rally Bar Mini, Rally Bar Huddle, Rally Board 65
+#   and MeetUp 2 as CollabOS devices updatable via the Sync app.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-collabos
+  vendor: logitech
+
+spec:
+  name: CollabOS
+  default_release_type: embedded_os
+  lifecycle_status: active
+  security_critical: true
+  description: >-
+    Embedded operating system for Logitech video-collaboration room appliances.
+    Released as its own version stream; individual hardware models are
+    registered separately and point here via a runs edge.
+
+  category_slugs:
+    - collaboration-devices
+
+  aliases:
+    - alias: Logitech CollabOS
+      kind: marketing_name
+      source_note: >-
+        Name used throughout hub.sync.logitech.com CollabOS guides, fetched
+        2026-09-16T02:16:00Z.

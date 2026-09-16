@@ -1,0 +1,29 @@
+# =============================================================================
+# Device: Logitech Scribe
+# =============================================================================
+# Whiteboard camera for hybrid meeting rooms.
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/scribe.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 698893 bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-scribe
+  vendor: logitech
+
+spec:
+  name: Scribe
+  model_identifier: "960-001332"
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  aliases:
+    - alias: Logitech Scribe
+      kind: marketing_name
+      source_note: Full product name as used on logitech.com.

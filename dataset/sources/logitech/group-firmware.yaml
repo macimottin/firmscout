@@ -1,0 +1,38 @@
+# =============================================================================
+# Source: GROUP firmware downloads
+# =============================================================================
+# Measured 2026-09-16T02:16:00Z:
+#   GET https://hub.sync.logitech.com/downloads/post/group-firmware-update-windows-mWYFkbXyMR77ayv
+#     -> HTTP 200, "Version: 9.4.52 l Released: 2021-06-25"
+#
+# ADR-0018: enabled false, terms pending.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: group-firmware
+  vendor: logitech
+
+spec:
+  product: logitech-group
+  source_type: html_page
+  url: https://hub.sync.logitech.com/downloads/post/group-firmware-update-windows-mWYFkbXyMR77ayv
+
+  official: true
+  quality_class: official_manufacturer
+
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-16T02:16:00Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: nobody has read Logitech Sync Hub terms for automated collection.
+  authentication_type: none
+
+  enabled: false
+  health: pending_review
+
+  expected_content_type: text/html
+  check_frequency_seconds: 86400
+  min_frequency_seconds: 3600

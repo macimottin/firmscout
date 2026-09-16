@@ -1,11 +1,15 @@
 {
   "formatVersion": 1,
-  "generatedAt": "2026-09-06T17:37:09Z",
-  "releaseCount": 48,
+  "generatedAt": "2026-09-16T02:16:00Z",
+  "releaseCount": 52,
   "vendors": [
+    "logitech",
     "mikrotik"
   ],
   "products": [
+    "logitech-collabos",
+    "logitech-group",
+    "logitech-meetup",
     "mikrotik-routeros"
   ],
   "license": "CC-BY-4.0",

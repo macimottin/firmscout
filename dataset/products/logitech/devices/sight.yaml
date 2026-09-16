@@ -1,0 +1,35 @@
+# =============================================================================
+# Device: Logitech Sight
+# =============================================================================
+# Tabletop multi-participant camera for medium and large meeting rooms.
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/sight.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 1042028 bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-sight
+  vendor: logitech
+
+spec:
+  name: Sight
+  model_identifier: "960-001503"
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  aliases:
+    - alias: "960-001510"
+      kind: sku
+      source_note: >-
+        Second part number on
+        https://www.logitech.com/en-us/products/video-conferencing/sight.html,
+        fetched 2026-09-16T02:13:26Z.
+    - alias: Logitech Sight
+      kind: marketing_name
+      source_note: Full product name as used on logitech.com.

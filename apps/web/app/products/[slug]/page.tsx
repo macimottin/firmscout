@@ -26,8 +26,9 @@ import {
   sourceLabel,
   sourceUrl,
 } from "@/lib/release-display";
+import { describeReleaseEmptyState } from "@/lib/applicability";
 
-export const revalidate = 3600;
+export const revalidate = 60;
 
 interface ProductPageProps {
   params: Promise<{ slug: string }>;
@@ -119,6 +120,13 @@ export default async function ProductPage({ params }: ProductPageProps) {
     historyResult.status === "fulfilled" ? historyResult.value.releases : [];
   const historyUnavailable =
     historyResult.status === "rejected" && isUnreachable(historyResult.reason);
+  const emptyReleases = describeReleaseEmptyState(product);
+
+  // /latest is a separate fetch from the product document. Prefer the live latest
+  // payload, but if that 404s while the product summary already names a version,
+  // show that version rather than "no release" under a product that has one.
+  const latestSummary =
+    latestRelease === null ? product.latestRelease : null;
 
   const jsonLd = buildJsonLd(product, latestRelease);
 
@@ -243,7 +251,10 @@ export default async function ProductPage({ params }: ProductPageProps) {
         </div>
       </dl>
 
-      <ApplicabilityAlert product={product} />
+      <ApplicabilityAlert
+        product={product}
+        observedRelease={latestRelease !== null || product.latestRelease !== null}
+      />
 
       <section className="mt-10" aria-labelledby="latest-heading">
         <h2 id="latest-heading" className="text-lg font-semibold text-ink-950">
@@ -255,11 +266,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               title="Latest release temporarily unavailable"
               detail="We couldn't load the latest release just now. Please try again shortly."
             />
-          ) : !latestRelease ? (
-            <p className="text-sm text-ink-500">
-              No release has been published for this product yet.
-            </p>
-          ) : (
+          ) : latestRelease ? (
             <div className="rounded-lg border border-ink-200 bg-white p-5">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="font-mono text-xl font-semibold text-ink-950">
@@ -338,6 +345,52 @@ export default async function ProductPage({ params }: ProductPageProps) {
                 </p>
               </div>
             </div>
+          ) : latestSummary ? (
+            <div className="rounded-lg border border-ink-200 bg-white p-5">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <Link
+                  href={`/releases/${latestSummary.id}`}
+                  className="font-mono text-xl font-semibold text-ink-950 underline-offset-2 hover:underline"
+                >
+                  {latestSummary.rawVersion}
+                </Link>
+                <Badge variant="outline">{latestSummary.channel}</Badge>
+              </div>
+              <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-ink-500">Latest observed version</dt>
+                  <dd className="mt-0.5 font-mono text-ink-900">
+                    {latestSummary.rawVersion}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-500">Release date</dt>
+                  <dd className="mt-0.5 text-ink-900">
+                    <ReleaseDate
+                      date={latestSummary.releaseDate}
+                      precision={latestSummary.releaseDatePrecision}
+                    />
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <p className="text-sm text-ink-500">
+              {emptyReleases.latest}
+              {emptyReleases.os ? (
+                <>
+                  {" "}
+                  See{" "}
+                  <Link
+                    href={`/products/${emptyReleases.os.slug}`}
+                    className="text-ink-800 underline-offset-2 hover:underline"
+                  >
+                    {emptyReleases.os.name}
+                  </Link>
+                  .
+                </>
+              ) : null}
+            </p>
           )}
         </div>
       </section>
@@ -354,7 +407,20 @@ export default async function ProductPage({ params }: ProductPageProps) {
             />
           ) : history.length === 0 ? (
             <p className="text-sm text-ink-500">
-              No prior releases are on record.
+              {emptyReleases.history}
+              {emptyReleases.os ? (
+                <>
+                  {" "}
+                  See{" "}
+                  <Link
+                    href={`/products/${emptyReleases.os.slug}`}
+                    className="text-ink-800 underline-offset-2 hover:underline"
+                  >
+                    {emptyReleases.os.name}
+                  </Link>
+                  .
+                </>
+              ) : null}
             </p>
           ) : (
             <ReleaseHistoryTable

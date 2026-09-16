@@ -1,0 +1,30 @@
+# =============================================================================
+# Device: Logitech Tap
+# =============================================================================
+# Touch controller for meeting rooms (USB compute attachment).
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/tap.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 716185 bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-tap
+  vendor: logitech
+
+spec:
+  name: Tap
+  model_identifier: "939-001950"
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  aliases:
+    - alias: Logitech Tap
+      kind: marketing_name
+      source_note: >-
+        Full product name as used on logitech.com, fetched 2026-09-16T02:13:26Z.

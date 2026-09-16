@@ -1,0 +1,40 @@
+# =============================================================================
+# Source: MeetUp 2 CollabOS release notes
+# =============================================================================
+# MeetUp 2 runs CollabOS, but Logitech publishes a distinct build for it
+# (2.1.150) rather than the Rally Bar build (2.1.176). This page is the
+# measured record of that build; it is not claimed to apply to Rally Bar.
+#
+# Measured 2026-09-16T02:16:00Z:
+#   GET https://hub.sync.logitech.com/meetup2/post/collabos-2-1-0-2-1-150-oijF6U7nVhcf40r
+#     -> HTTP 200, heading "CollabOS 2.1.0 (2.1.150)"
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: collabos-meetup-2-notes
+  vendor: logitech
+
+spec:
+  product: logitech-collabos
+  source_type: html_page
+  url: https://hub.sync.logitech.com/meetup2/post/collabos-2-1-0-2-1-150-oijF6U7nVhcf40r
+
+  official: true
+  quality_class: official_manufacturer
+
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-16T02:16:00Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: nobody has read Logitech Sync Hub terms for automated collection.
+  authentication_type: none
+
+  enabled: false
+  health: pending_review
+
+  expected_content_type: text/html
+  check_frequency_seconds: 86400
+  min_frequency_seconds: 3600

@@ -1,0 +1,44 @@
+# =============================================================================
+# Device: Logitech Tap IP
+# =============================================================================
+# Network-attached touch controller for meeting rooms (appliance mode).
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/tap-ip.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 742121 bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-tap-ip
+  vendor: logitech
+
+spec:
+  name: Tap IP
+  model_identifier: "952-000085"
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  runs:
+    - product: logitech-collabos
+      kind: runs_os
+      source_note: >-
+        https://hub.sync.logitech.com/learn/post/what-s-new-in-collabos-2-1-evolving-rally-bar-65-and-more-JPyCxUEILto5oYm,
+        fetched 2026-09-16T02:16:00Z: CollabOS 2.1 names Tap IP among the
+        appliances the release applies to. Which build belongs on this exact
+        SKU is not claimed here.
+
+  aliases:
+    - alias: "952-000088"
+      kind: sku
+      source_note: >-
+        Second part number on
+        https://www.logitech.com/en-us/products/video-conferencing/tap-ip.html,
+        fetched 2026-09-16T02:13:26Z.
+    - alias: Logitech Tap IP
+      kind: marketing_name
+      source_note: Full product name as used on logitech.com.

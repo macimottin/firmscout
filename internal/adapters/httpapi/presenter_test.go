@@ -1063,6 +1063,9 @@ func TestSearchResultEchoesModelIdentifier(t *testing.T) {
 	if device.ModelIdentifier != "CRS328-24P-4S+RM" {
 		t.Errorf("modelIdentifier = %q, want the code the caller pasted", device.ModelIdentifier)
 	}
+	if device.Category != "switches" {
+		t.Errorf("category = %q, want switches (leaf), not the network-devices parent", device.Category)
+	}
 	// This device's product name IS its product code, so the name test wins before
 	// the alias test is ever reached. That is the honest label: the query really did
 	// hit the name. matchedOn describes which field the query plausibly hit, not

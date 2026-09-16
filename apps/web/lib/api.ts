@@ -342,6 +342,11 @@ export interface SearchResultItem {
    * response's always-present field (api.md §3.2).
    */
   modelIdentifier?: string;
+  /**
+   * Most specific category slug when the catalogue recorded one (leaf preferred
+   * over a parent such as network-devices). Omitted when none is recorded.
+   */
+  category?: string;
   vendor: VendorSummary | null;
   matchedOn: SearchMatchedOn;
 }
@@ -509,19 +514,19 @@ export function listVendors(options?: {
 }): Promise<VendorListResponse> {
   return apiFetch<VendorListResponse>("/vendors", {
     searchParams: { limit: options?.limit, cursor: options?.cursor },
-    revalidate: 3600,
+    revalidate: 60,
   });
 }
 
 export function getVendor(slug: string): Promise<Vendor> {
   return apiFetch<Vendor>(`/vendors/${encodeURIComponent(slug)}`, {
-    revalidate: 3600,
+    revalidate: 60,
   });
 }
 
 export function getProduct(slug: string): Promise<Product> {
   return apiFetch<Product>(`/products/${encodeURIComponent(slug)}`, {
-    revalidate: 3600,
+    revalidate: 60,
   });
 }
 
@@ -547,7 +552,7 @@ export function listProductReleases(
         limit: options?.limit,
         cursor: options?.cursor,
       },
-      revalidate: 300,
+      revalidate: 60,
     },
   );
 }
@@ -560,7 +565,7 @@ export function getLatestRelease(
     `/products/${encodeURIComponent(slug)}/latest`,
     {
       searchParams: { channel: options?.channel },
-      revalidate: 300,
+      revalidate: 60,
     },
   );
 }

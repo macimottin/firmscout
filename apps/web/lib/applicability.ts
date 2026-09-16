@@ -51,15 +51,38 @@ const NONE_RECORDED_NOTICE: ApplicabilityNotice = {
     "either, so there is nothing yet to say applies here.",
 };
 
+function ownFirmwareIsOnThePage(
+  product: Product,
+  observedRelease: boolean,
+): boolean {
+  const own = product.firmwareApplicability.ownReleases as OwnReleases | undefined;
+  return (
+    observedRelease ||
+    own?.mapped === true ||
+    product.latestRelease !== null
+  );
+}
+
 /**
  * `null` means "no notice" -- `basis === "own_releases"` is the one case where
  * today's page is already correct, because the releases shown ARE mapped to this
  * product. Every other basis renders a notice, including one this client does not
  * recognise: an absent notice reads as "verified", and staying silent on an
  * unrecognised value would make exactly that false claim.
+ *
+ * `observedRelease` is for the product page, which loads `/latest` separately from
+ * the product document. Those two fetches do not share a cache. A stale product
+ * payload can still say `none_recorded` while `/latest` has already returned a
+ * version -- rendering NONE_RECORDED_NOTICE above that version is a page
+ * contradicting itself, which is the same class of defect the vendor count used
+ * to be. Pass true when the page is about to show a release.
  */
-export function describeApplicability(product: Product): ApplicabilityNotice | null {
+export function describeApplicability(
+  product: Product,
+  options?: { observedRelease?: boolean },
+): ApplicabilityNotice | null {
   const basis = product.firmwareApplicability.basis;
+  const observedRelease = options?.observedRelease === true;
 
   if (basis === "own_releases") return null;
 
@@ -102,6 +125,12 @@ export function describeApplicability(product: Product): ApplicabilityNotice | n
   }
 
   // "none_recorded", and any future or unrecognised basis: the cautious fallback.
+  // Never use NONE_RECORDED_NOTICE when the same page is displaying a version --
+  // that sentence is then false of the viewport, even if it was true of a stale
+  // product payload.
+  if (ownFirmwareIsOnThePage(product, observedRelease)) {
+    return basis === "none_recorded" ? null : UNVERIFIED_NO_OS_WITH_OWN_NOTICE;
+  }
   return NONE_RECORDED_NOTICE;
 }
 
@@ -138,3 +167,42 @@ export function searchVersionCellLabel(latestVersion: string | undefined): strin
 export function searchApplicabilityCaveat(product: Product | null): boolean {
   return product !== null && product.firmwareApplicability.verified === false;
 }
+
+export interface ReleaseEmptyState {
+  latest: string;
+  history: string;
+  os: { slug: string; name: string } | null;
+}
+
+/**
+ * Copy for the Latest / History sections when this product has no mapped releases.
+ *
+ * A device that runs an OS (ADR-0024) must not say "no release has been published"
+ * right under a banner that firmware lives on that OS -- that is the same viewport
+ * contradiction as "no firmware recorded" above a version number. Point at the OS
+ * page instead, and still refuse to treat its latest version as this model's.
+ */
+export function describeReleaseEmptyState(product: Product): ReleaseEmptyState {
+  const os = product.runs[0];
+  const own = product.firmwareApplicability.ownReleases as OwnReleases | undefined;
+  const hasOwn = own?.mapped === true;
+  if (
+    product.firmwareApplicability.basis === "runs_os_unverified" &&
+    os &&
+    !hasOwn
+  ) {
+    return {
+      latest:
+        `${product.name} has no release stream of its own. Firmware is published against ` +
+        `${os.name}. FirmScout has not verified which ${os.name} release applies to this exact model.`,
+      history: `Version history for this model is recorded on ${os.name}, not as releases of ${product.name}.`,
+      os: { slug: os.slug, name: os.name },
+    };
+  }
+  return {
+    latest: "No release has been published for this product yet.",
+    history: "No prior releases are on record.",
+    os: null,
+  };
+}
+

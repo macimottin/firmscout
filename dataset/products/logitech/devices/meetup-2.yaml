@@ -1,0 +1,53 @@
+# =============================================================================
+# Device: Logitech MeetUp 2
+# =============================================================================
+# All-in-one conference camera for small USB-based meeting rooms.
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/conference-cameras/meetup2.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 456062 bytes.
+#   GET https://hub.sync.logitech.com/support/post/hardware-to-service-sku-mapping-guide-YouZFUshmS5mcl0
+#     fetched 2026-09-16T02:13:26Z, HTTP 200 — Logitech Sync support article listing
+#     MeetUp 2 hardware part numbers (960-001680 through 960-001683, 960-001690,
+#     960-001691, 960-001693, 960-001711). The product page does not expose a
+#     structured part-number selector; the primary US SKU below is taken from that
+#     official mapping guide.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-meetup-2
+  vendor: logitech
+
+spec:
+  name: MeetUp 2
+  model_identifier: "960-001680"
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  runs:
+    - product: logitech-collabos
+      kind: runs_os
+      source_note: >-
+        https://hub.sync.logitech.com/collabosguides/post/1-5-how-to-update-collabos-devices-1wt82xY9LTMStHl
+        and https://hub.sync.logitech.com/meetup2/post/collabos-2-1-0-2-1-150-oijF6U7nVhcf40r,
+        fetched 2026-09-16T02:16:00Z: MeetUp 2 is a CollabOS device. Logitech
+        publishes a MeetUp 2-specific CollabOS build (2.1.150), distinct from
+        the Rally Bar build (2.1.176).
+
+  aliases:
+    - alias: "960-001681"
+      kind: sku
+      source_note: >-
+        Listed under MeetUp 2 in Logitech Sync's hardware-to-service SKU mapping
+        guide, fetched 2026-09-16T02:13:26Z.
+    - alias: "960-001682"
+      kind: sku
+      source_note: Same mapping guide, fetched 2026-09-16T02:13:26Z.
+    - alias: "960-001683"
+      kind: sku
+      source_note: Same mapping guide, fetched 2026-09-16T02:13:26Z.

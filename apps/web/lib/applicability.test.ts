@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   describeApplicability,
+  describeReleaseEmptyState,
   searchApplicabilityCaveat,
   searchVersionCellLabel,
 } from "./applicability";
@@ -121,7 +122,64 @@ describe("describeApplicability", () => {
       product({ firmwareApplicability: { verified: false, basis: "none_recorded", ownReleases: { mapped: false, releaseCount: 0 } }, runs: [] }),
     );
     expect(notice).not.toBeNull();
+    expect(notice?.title).toBe("No firmware recorded for this product");
     expect(notice?.description).not.toContain("undefined");
+  });
+
+  it("does not claim no firmware when the same page is showing a release", () => {
+    // Product document cached as none_recorded; /latest already returned a version.
+    const notice = describeApplicability(
+      product({
+        name: "MeetUp",
+        runs: [],
+        firmwareApplicability: {
+          verified: false,
+          basis: "none_recorded",
+          ownReleases: { mapped: false, releaseCount: 0 },
+        },
+        latestRelease: null,
+      }),
+      { observedRelease: true },
+    );
+    expect(notice).toBeNull();
+  });
+
+  it("does not claim no firmware when the product payload already carries a latest release", () => {
+    const notice = describeApplicability(
+      product({
+        runs: [],
+        firmwareApplicability: {
+          verified: false,
+          basis: "none_recorded",
+          ownReleases: { mapped: true, releaseCount: 1 },
+        },
+      }),
+    );
+    expect(notice).toBeNull();
+  });
+});
+
+describe("describeReleaseEmptyState", () => {
+  it("does not say no release was published when firmware lives on the OS the device runs", () => {
+    const copy = describeReleaseEmptyState(product());
+    expect(copy.latest).not.toContain("No release has been published");
+    expect(copy.latest).toContain("RouterOS");
+    expect(copy.os).toEqual({ slug: "mikrotik-routeros", name: "RouterOS" });
+  });
+
+  it("keeps the plain empty copy when nothing is recorded at all", () => {
+    const copy = describeReleaseEmptyState(
+      product({
+        runs: [],
+        firmwareApplicability: {
+          verified: false,
+          basis: "none_recorded",
+          ownReleases: { mapped: false, releaseCount: 0 },
+        },
+      }),
+    );
+    expect(copy.latest).toContain("No release has been published");
+    expect(copy.os).toBeNull();
   });
 });
 

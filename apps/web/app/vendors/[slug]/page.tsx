@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Unavailable } from "@/components/unavailable";
+import { VendorProductCard } from "@/components/vendor-product-card";
 import {
   getVendor,
   isNotFound,
@@ -153,19 +153,12 @@ export default async function VendorPage({ params }: VendorPageProps) {
           <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {products.map((product) => (
               <li key={product.slug}>
-                <Link
-                  href={`/products/${product.slug}`}
-                  className="block h-full"
-                >
-                  <Card className="h-full transition-colors hover:border-ink-400">
-                    <CardHeader>
-                      <CardTitle>{product.name}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-sm text-ink-500">
-                      View product details
-                    </CardContent>
-                  </Card>
-                </Link>
+                <VendorProductCard
+                  slug={product.slug}
+                  name={product.name}
+                  category={product.category}
+                  modelIdentifier={product.modelIdentifier}
+                />
               </li>
             ))}
           </ul>

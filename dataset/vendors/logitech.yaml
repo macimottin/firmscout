@@ -1,0 +1,31 @@
+# =============================================================================
+# Vendor: Logitech
+# =============================================================================
+# Video collaboration hardware and peripherals. Registered as the vendor anchor
+# for room-system devices in dataset/products/logitech/devices/.
+#
+# Measured 2026-09-16, FirmScout's declared User-Agent:
+#   GET https://www.logitech.com/en-us/
+#     -> HTTP/2 200
+#   GET https://support.logi.com/
+#     -> HTTP/2 302, location: https://support.logi.com/hc
+#     -> HTTP/2 200
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Vendor
+
+metadata:
+  slug: logitech
+
+spec:
+  name: Logitech
+  homepage_url: https://www.logitech.com
+  support_url: https://support.logi.com/hc
+  country_code: CH
+  notes: >-
+    Manufacturer of webcams, headsets, keyboards, mice, and video-collaboration
+    room systems (Rally Bar, MeetUp, Tap, Group, Scribe, Sight). This registry
+    entry holds the vendor record only; per-model devices are registered under
+    dataset/products/logitech/devices/ with part numbers taken from Logitech's
+    own product pages.

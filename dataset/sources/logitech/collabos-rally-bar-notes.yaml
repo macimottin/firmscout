@@ -1,0 +1,45 @@
+# =============================================================================
+# Source: CollabOS release notes (Rally Bar / Rally Bar Mini)
+# =============================================================================
+# Official notes Logitech publishes on hub.sync.logitech.com. Firmware images
+# themselves are delivered through Sync / updates.vc.logitech.com, not as a
+# public file on this page -- the page is the version record.
+#
+# Measured 2026-09-16T02:16:00Z:
+#   GET https://hub.sync.logitech.com/robots.txt
+#     -> HTTP 200, body "User-agent: *" with no Disallow rules (full allow).
+#   GET https://hub.sync.logitech.com/rallybar/post/collabos-2-1-0-2-1-176-YK1aP4Sa2Atdnmg
+#     -> HTTP 200, heading "CollabOS 2.1.0 (2.1.176)"
+#
+# ADR-0018: enabled false, terms pending.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: collabos-rally-bar-notes
+  vendor: logitech
+
+spec:
+  product: logitech-collabos
+  source_type: html_page
+  url: https://hub.sync.logitech.com/rallybar/post/collabos-2-1-0-2-1-176-YK1aP4Sa2Atdnmg
+
+  official: true
+  quality_class: official_manufacturer
+
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-16T02:16:00Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: nobody has read Logitech Sync Hub terms for automated collection.
+    robots.txt on hub.sync.logitech.com is a wildcard group with no Disallow.
+  authentication_type: none
+
+  enabled: false
+  health: pending_review
+
+  expected_content_type: text/html
+  check_frequency_seconds: 86400
+  min_frequency_seconds: 3600

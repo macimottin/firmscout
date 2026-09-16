@@ -1,0 +1,33 @@
+# =============================================================================
+# Device: Logitech MeetUp
+# =============================================================================
+# All-in-one conference camera for huddle rooms (first generation).
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/conference-cameras/meetup.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 660570 bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-meetup
+  vendor: logitech
+
+spec:
+  name: MeetUp
+  model_identifier: "960-001101"
+  default_release_type: firmware
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  aliases:
+    - alias: "960-001201"
+      kind: sku
+      source_note: >-
+        Second part number on
+        https://www.logitech.com/en-us/products/video-conferencing/conference-cameras/meetup.html,
+        fetched 2026-09-16T02:13:26Z.

@@ -1,0 +1,39 @@
+# =============================================================================
+# Device: Logitech GROUP
+# =============================================================================
+# Speakerphone and expansion-microphone video conferencing system for mid-size
+# rooms.
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/conference-cameras/group-conferencecam.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 581041 bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-group
+  vendor: logitech
+
+spec:
+  name: GROUP
+  model_identifier: "960-001054"
+  default_release_type: firmware
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  aliases:
+    - alias: "960-001060"
+      kind: sku
+      source_note: >-
+        Second part number on
+        https://www.logitech.com/en-us/products/video-conferencing/conference-cameras/group-conferencecam.html,
+        fetched 2026-09-16T02:13:26Z.
+    - alias: Group
+      kind: marketing_name
+      source_note: >-
+        Vendor styles the product name in all caps on logitech.com; "Group" is
+        the keyboard-typeable form fleet inventories often use.

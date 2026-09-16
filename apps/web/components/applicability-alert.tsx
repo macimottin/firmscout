@@ -11,9 +11,18 @@ import { describeApplicability } from "@/lib/applicability";
  *
  * Renders nothing, not an empty box, when `describeApplicability` returns null --
  * that is the "own_releases" case, where today's page is already correct.
+ *
+ * `observedRelease` must match whether the page is about to render a latest
+ * release: product and /latest are separate fetches and can disagree on cache.
  */
-export function ApplicabilityAlert({ product }: { product: Product }) {
-  const notice = describeApplicability(product);
+export function ApplicabilityAlert({
+  product,
+  observedRelease = false,
+}: {
+  product: Product;
+  observedRelease?: boolean;
+}) {
+  const notice = describeApplicability(product, { observedRelease });
   if (!notice) return null;
   return (
     <div className="mt-4">

@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/vendors" },
 };
 
-export const revalidate = 3600;
+export const revalidate = 60;
 
 export default async function VendorsPage() {
   let vendors;

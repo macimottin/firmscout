@@ -1,0 +1,45 @@
+# =============================================================================
+# Device: Logitech Rally Bar Mini
+# =============================================================================
+# All-in-one video bar for small to medium meeting rooms.
+#
+# Provenance:
+#   GET https://www.logitech.com/en-us/products/video-conferencing/room-solutions/rallybarmini.html
+#     fetched 2026-09-16T02:13:26Z, HTTP 200, 565223 bytes.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Product
+
+metadata:
+  slug: logitech-rally-bar-mini
+  vendor: logitech
+
+spec:
+  name: Rally Bar Mini
+  model_identifier: "960-001336"
+  lifecycle_status: unknown
+
+  category_slugs:
+    - collaboration-devices
+
+  runs:
+    - product: logitech-collabos
+      kind: runs_os
+      source_note: >-
+        https://hub.sync.logitech.com/collabosguides/post/1-5-how-to-update-collabos-devices-1wt82xY9LTMStHl,
+        fetched 2026-09-16T02:16:00Z: Rally Bar Mini is listed as a CollabOS
+        device. Which CollabOS build belongs on this exact model is not claimed.
+
+  aliases:
+    - alias: "960-001348"
+      kind: sku
+      source_note: >-
+        White variant part number on
+        https://www.logitech.com/en-us/products/video-conferencing/room-solutions/rallybarmini.html,
+        fetched 2026-09-16T02:13:26Z.
+    - alias: "960-001563"
+      kind: sku
+      source_note: >-
+        TAA Compliant variant part number on the same page, fetched
+        2026-09-16T02:13:26Z.

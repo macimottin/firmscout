@@ -1,0 +1,40 @@
+# =============================================================================
+# Source: MeetUp (1st gen) firmware downloads
+# =============================================================================
+# Measured 2026-09-16T02:16:00Z:
+#   GET https://hub.sync.logitech.com/downloads/post/meetup-firmware-update-windows-RVOZDbc6ubeziX8
+#     -> HTTP 200, "Version:1.0.272 l Last Update:2024-07-25"
+#   GET https://hub.sync.logitech.com/meetup/post/meetup-1-0-272-BjitMlxTJkczxcN
+#     -> HTTP 200, "Release date: July 26, 2024"
+#
+# ADR-0018: enabled false, terms pending.
+# =============================================================================
+
+apiVersion: firmscout.dev/v1alpha1
+kind: Source
+
+metadata:
+  slug: meetup-firmware
+  vendor: logitech
+
+spec:
+  product: logitech-meetup
+  source_type: html_page
+  url: https://hub.sync.logitech.com/meetup/post/meetup-1-0-272-BjitMlxTJkczxcN
+
+  official: true
+  quality_class: official_manufacturer
+
+  robots_policy_status: allowed
+  robots_checked_at: 2026-09-16T02:16:00Z
+  terms_review_status: pending
+  terms_review_note: >-
+    ADR-0018: nobody has read Logitech Sync Hub terms for automated collection.
+  authentication_type: none
+
+  enabled: false
+  health: pending_review
+
+  expected_content_type: text/html
+  check_frequency_seconds: 86400
+  min_frequency_seconds: 3600

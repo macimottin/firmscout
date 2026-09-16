@@ -315,8 +315,8 @@ func PresentProduct(s application.ProductSummary) ProductDTO {
 		Conflict:          presentProductConflict(s.Conflict),
 		LastVerifiedAt:    timestamp(s.LastVerifiedAt),
 	}
-	if len(s.CategorySlugs) > 0 {
-		dto.Category = s.CategorySlugs[0]
+	if cat := primaryCategorySlug(s.CategorySlugs); cat != "" {
+		dto.Category = cat
 	}
 	dto.ReleaseType = s.LatestReleaseType
 	if s.FamilyName != "" {
@@ -716,9 +716,13 @@ type SearchResultItemDTO struct {
 	// thing they hold. It carries omitempty, unlike the detail response's field: a
 	// search result is a compact hit descriptor, and an explicit null on every software
 	// product in every result set is noise rather than honesty.
-	ModelIdentifier string     `json:"modelIdentifier,omitempty"`
-	Vendor          *VendorRef `json:"vendor,omitempty"`
-	MatchedOn       string     `json:"matchedOn"`
+	ModelIdentifier string `json:"modelIdentifier,omitempty"`
+	// Category is the product's most specific classification slug when one is recorded
+	// (see primaryCategorySlug). Omitted when the product has none: a search hit without
+	// a type is still a valid hit; inventing a category here would be worse than silence.
+	Category string     `json:"category,omitempty"`
+	Vendor   *VendorRef `json:"vendor,omitempty"`
+	MatchedOn string    `json:"matchedOn"`
 }
 
 // SearchResponse is the `SearchResponse` schema.
@@ -741,11 +745,36 @@ func PresentSearchResults(summaries []application.ProductSummary, query string) 
 			Slug:            s.ProductSlug,
 			Name:            s.ProductName,
 			ModelIdentifier: s.ModelIdentifier,
+			Category:        primaryCategorySlug(s.CategorySlugs),
 			Vendor:          &VendorRef{Slug: s.VendorSlug, Name: s.VendorName},
 			MatchedOn:       matchedOn(s, needle),
 		})
 	}
 	return out
+}
+
+// primaryCategorySlug picks the classification a UI should show for a product.
+//
+// Registry documents list a parent before a manufacturer's own class
+// (network-devices, then switches / wireless-devices / routers). Returning the first
+// slug made every hardware card on a vendor page read as the generic parent, which
+// is true and also useless. Preferring a leaf over those parents surfaces the type
+// the registry already recorded, without inventing a new one.
+func primaryCategorySlug(slugs []string) string {
+	if len(slugs) == 0 {
+		return ""
+	}
+	for i := len(slugs) - 1; i >= 0; i-- {
+		switch slugs[i] {
+		case "networking", "network-devices":
+			continue
+		default:
+			if slugs[i] != "" {
+				return slugs[i]
+			}
+		}
+	}
+	return slugs[0]
 }
 
 // matchedOn reports which field the query most plausibly hit.
